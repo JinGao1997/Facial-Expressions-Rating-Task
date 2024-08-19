@@ -1,26 +1,21 @@
-# 安装并加载所需的库
-install.packages("readxl")
-install.packages("dplyr")
-install.packages("tidyr")
-install.packages("writexl")
-
-library(readxl)
+# 加载必要的R包
 library(dplyr)
 library(tidyr)
-library(writexl)
+library(readxl)
+library(openxlsx)
 
 # Step 1: 读取数据
-file_path <- "N:/JinLab/Personal_JG_Lab/R_course/Facial Expressions Rating Task/aligned_data.xlsx"
+file_path <- "aligned_data.xlsx"
 data <- read_excel(file_path)
 
 # Step 2: 从 Material 列中提取表情类型
 data <- data %>%
   mutate(Expression_Type = case_when(
-    grepl("dis", Material) ~ "Disgust",
-    grepl("enj", Material) ~ "Enjoyment",
-    grepl("aff", Material) ~ "Affiliation",
-    grepl("dom", Material) ~ "Dominance",
-    grepl("neu", Material) ~ "Neutral",
+    grepl("dis", Material, ignore.case = TRUE) ~ "Disgust",
+    grepl("enj", Material, ignore.case = TRUE) ~ "Enjoyment",
+    grepl("aff", Material, ignore.case = TRUE) ~ "Affiliation",
+    grepl("dom", Material, ignore.case = TRUE) ~ "Dominance",
+    grepl("neu", Material, ignore.case = TRUE) ~ "Neutral",
     TRUE ~ "Other"
   ))
 
@@ -33,92 +28,117 @@ data <- data %>%
     Categorizing_Expressions_Score == 4 ~ "Disgust", 
     Categorizing_Expressions_Score == 5 ~ "Neutral", 
     Categorizing_Expressions_Score == 6 ~ "Other",
-    TRUE ~ NA_character_  # 如果遇到未匹配的值，将其设为 NA
+    TRUE ~ NA_character_
   ))
 
 # 初始化存储结果的数据框
 results <- data.frame(
   CASE = integer(),
   Expression_Type = character(),
-  Unbiased_Hit_Rate = numeric(),
-  Chance_Unbiased_Hit_Rate = numeric(),
+  UHR = numeric(),
+  Chance_UHR = numeric(),
   Performance_Above_Chance = numeric(),
   stringsAsFactors = FALSE
 )
 
-# Step 4: 按CASE计算Unbiased_Hit_Rate和Chance_Unbiased_Hit_Rate
+# 初始化存储不完整数据的CASE列表
+incomplete_cases <- list()
+
+# 初始化Excel工作簿
+wb <- createWorkbook()
+
+# 计算 UHR 和 Chance UHR
+calculate_uhr_chance_uhr <- function(conf_matrix) {
+  uhr_results <- numeric(length(rownames(conf_matrix)))
+  chance_uhr_results <- numeric(length(rownames(conf_matrix)))
+  N <- sum(conf_matrix)  # 总和 N
+  
+  for (i in seq_along(rownames(conf_matrix))) {
+    emotion <- rownames(conf_matrix)[i]
+    a <- conf_matrix[emotion, emotion]  # 对角线元素
+    b <- sum(conf_matrix[emotion, ]) - a  # 行中的非对角线元素之和
+    d <- sum(conf_matrix[, emotion]) - a  # 列中的非对角线元素之和
+    
+    # 检查 b 和 d 是否为0，避免除以零
+    if ((a + b) > 0 & (a + d) > 0 & N > 0) {
+      UHR <- (a / (a + b)) * (a / (a + d))
+      Pc <- ((a + b) / N) * ((a + d) / N)
+    } else {
+      UHR <- 0
+      Pc <- 0
+    }
+    
+    uhr_results[i] <- UHR
+    chance_uhr_results[i] <- Pc
+  }
+  
+  return(list(UHR = uhr_results, Chance_UHR = chance_uhr_results))
+}
+
+# Step 4: 按CASE计算 Unbiased_Hit_Rate 和 Chance_Unbiased_Hit_Rate
 cases <- unique(data$CASE)
+expected_emotions <- c("Affiliation", "Disgust", "Dominance", "Enjoyment", "Neutral")
 
 for (case in cases) {
   # 筛选出当前CASE的数据
   case_data <- data %>% filter(CASE == case)
   
-  # 创建选择矩阵
+  # 创建选择矩阵，排除 "Other" 类别
   choice_matrix <- case_data %>%
+    filter(Expression_Type != "Other", Chosen_Expression != "Other") %>%
     count(Expression_Type, Chosen_Expression) %>%
-    spread(Chosen_Expression, n, fill = 0)
+    spread(key = Chosen_Expression, value = n, fill = 0) %>%
+    complete(Expression_Type = expected_emotions, fill = list(n = 0))
   
-  # 计算行边际值和列边际值
-  row_margins <- rowSums(choice_matrix[,-1])
-  col_margins <- colSums(choice_matrix[,-1])
+  # 转换为普通数据框以支持行名
+  choice_matrix <- as.data.frame(choice_matrix)
   
-  # 计算 UHR，包括 "Other" 对其他表情的影响
-  uhr_values <- mapply(function(row, col, value, row_type, col_type) {
-    if (row_type == "Other" || col_type == "Other") {
-      return(0)  # 假设 "Other" 的行和列对最终 UHR 不贡献直接值
-    } else if (row == 0 || col == 0) {
-      return(0)
-    } else {
-      return((value^2) / (row * col))
-    }
-  }, 
-  row = rep(row_margins, times = length(col_margins)), 
-  col = rep(col_margins, each = length(row_margins)), 
-  value = as.vector(as.matrix(choice_matrix[,-1])),
-  row_type = rep(choice_matrix$Expression_Type, times = length(col_margins)),
-  col_type = rep(names(choice_matrix)[-1], each = length(row_margins)))
+  # 检查是否包含所有预期的情绪类别
+  missing_emotions <- setdiff(expected_emotions, colnames(choice_matrix))
   
-  # 将 UHR 值转为矩阵形式并计算最终 UHR
-  uhr_matrix <- matrix(uhr_values, nrow = nrow(choice_matrix), ncol = ncol(choice_matrix) - 1, byrow = TRUE)
-  uhr_final <- rowSums(uhr_matrix)
+  if (length(missing_emotions) > 0) {
+    # 如果有缺失情绪类别，记录CASE并跳过此CASE的计算
+    incomplete_cases[[length(incomplete_cases) + 1]] <- list(CASE = case, Missing_Emotions = missing_emotions)
+    next
+  }
   
-  # 过滤掉 "Other" 作为实际表情类型，并显示结果
-  uhr_summary <- data.frame(Expression_Type = choice_matrix$Expression_Type, Unbiased_Hit_Rate = uhr_final)
-  uhr_summary <- uhr_summary %>% filter(Expression_Type != "Other")
+  rownames(choice_matrix) <- choice_matrix$Expression_Type
+  choice_matrix <- choice_matrix[, -1]
   
-  # 计算每个CASE的期望的机会水平 UHR
-  expression_probs <- case_data %>%
-    count(Expression_Type) %>%
-    mutate(Prob_Expression_Type = n / sum(n))
+  # 将数据框转换为矩阵
+  choice_matrix <- as.matrix(choice_matrix)
   
-  chosen_expression_probs <- case_data %>%
-    count(Chosen_Expression) %>%
-    mutate(Prob_Chosen_Expression = n / sum(n))
+  # 将混淆矩阵保存到Excel工作簿
+  addWorksheet(wb, paste("CASE", case))
+  writeData(wb, paste("CASE", case), choice_matrix, rowNames = TRUE)
   
-  expected_probs <- expression_probs %>%
-    full_join(chosen_expression_probs, by = c("Expression_Type" = "Chosen_Expression")) %>%
-    mutate(Chance_Unbiased_Hit_Rate = Prob_Expression_Type * Prob_Chosen_Expression) %>%
-    select(Expression_Type, Chance_Unbiased_Hit_Rate)
+  # 计算 UHR 和 Chance UHR
+  uhr_chance_results <- calculate_uhr_chance_uhr(conf_matrix = choice_matrix)
   
-  # 计算每个CASE的Performance_Above_Chance
-  uhr_comparison <- uhr_summary %>%
-    left_join(expected_probs, by = "Expression_Type") %>%
-    mutate(
+  for (i in seq_along(expected_emotions)) {
+    results <- rbind(results, data.frame(
       CASE = case,
-      Performance_Above_Chance = Unbiased_Hit_Rate - Chance_Unbiased_Hit_Rate
-    )
-  
-  # 存储结果
-  results <- bind_rows(results, uhr_comparison)
+      Expression_Type = expected_emotions[i],
+      UHR = uhr_chance_results$UHR[i],
+      Chance_UHR = uhr_chance_results$Chance_UHR[i],
+      Performance_Above_Chance = uhr_chance_results$UHR[i] - uhr_chance_results$Chance_UHR[i]
+    ))
+  }
 }
 
-# Step 5: 将结果按CASE分开显示，并保存为CSV文件
-results_by_case <- results %>%
-  pivot_wider(names_from = Expression_Type, values_from = c(Unbiased_Hit_Rate, Chance_Unbiased_Hit_Rate, Performance_Above_Chance))
+# 保存混淆矩阵到文件
+saveWorkbook(wb, "confusion_matrices_all_cases.xlsx", overwrite = TRUE)
 
-# 保存按CASE分开的结果为CSV文件
-write.csv(results_by_case, "UHR_and_Chance_UHR_by_CASE.csv", row.names = FALSE)
+# 打印缺失情绪类别的CASE
+if (length(incomplete_cases) > 0) {
+  cat("Incomplete CASEs:\n")
+  for (case_info in incomplete_cases) {
+    cat("CASE:", case_info$CASE, "- Missing Emotions:", paste(case_info$Missing_Emotions, collapse = ", "), "\n")
+  }
+}
 
-# 输出结果
-print("Summary of UHR and Chance-Level UHR by CASE:")
-print(results_by_case)
+# 保存 UHR 和 Chance UHR 结果到 Excel 文件
+write.xlsx(results, "uhr_results_all_cases.xlsx", rowNames = FALSE)
+
+# 打印最终结果
+print(results)
