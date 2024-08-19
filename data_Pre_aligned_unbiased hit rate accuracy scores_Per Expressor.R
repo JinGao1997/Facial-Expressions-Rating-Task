@@ -3,14 +3,14 @@ install.packages("readxl")
 install.packages("dplyr")
 install.packages("tidyr")
 install.packages("ggplot2")
-install.packages("stringr")  # 新增的包
+install.packages("stringr")
 
 # 加载所需的库
 library(readxl)
 library(dplyr)
 library(tidyr)
 library(ggplot2)
-library(stringr)  # 新增的库
+library(stringr)
 
 # Step 1: 读取数据
 file_path <- "N:/JinLab/Personal_JG_Lab/R_course/Facial Expressions Rating Task/aligned_data.xlsx"
@@ -32,7 +32,6 @@ data <- data %>%
     str_detect(Material, "Male") ~ "Male"
   ))
 
-
 # Step 3: 将 Categorizing_Expressions_Score 映射为 Chosen_Expression
 data <- data %>%
   mutate(Chosen_Expression = case_when(
@@ -45,31 +44,37 @@ data <- data %>%
     TRUE ~ NA_character_
   ))
 
-# Step 4: 创建选择矩阵
+# Step 4: 创建选择矩阵并计算 UHR 和 Chance UHR
 uhr_results <- data %>%
   group_by(Expressor, Expression_Type, Material, Chosen_Expression, Gender) %>%
   summarise(n = n(), .groups = 'drop') %>%
   spread(Chosen_Expression, n, fill = 0) %>%
   ungroup()
 
-# Step 5: 计算每个单元格的 UHR 值
+# Step 5: 计算每个单元格的 UHR 和 Chance UHR
 uhr_results <- uhr_results %>%
   rowwise() %>%
   mutate(
     row_sum = sum(c_across(where(is.numeric)), na.rm = TRUE),
-    across(
-      where(is.numeric),
-      ~ ifelse(row_sum == 0, 0, .x^2 / (row_sum * sum(.x))),
-      .names = "UHR_{col}"
+    UHR = ifelse(
+      row_sum > 0,
+      (get(Expression_Type) / row_sum) * (get(Expression_Type) / sum(get(Expression_Type), na.rm = TRUE)),
+      0
+    ),
+    Chance_UHR = ifelse(
+      row_sum > 0,
+      ((sum(c_across(where(is.numeric)), na.rm = TRUE)) / row_sum) * 
+        ((sum(get(Expression_Type), na.rm = TRUE)) / row_sum),
+      0
     )
   )
 
 # Step 6: 使用子集选择所需的列
-uhr_results_filtered <- uhr_results[, c("Expressor", "Gender", "Expression_Type", grep("UHR", names(uhr_results), value = TRUE))]
+uhr_results_filtered <- uhr_results %>%
+  select(Expressor, Gender, Expression_Type, UHR, Chance_UHR)
 
 # Step 7: 计算每个 Expressor 在不同表情类型下的平均 UHR
 uhr_by_expressor <- uhr_results_filtered %>%
-  pivot_longer(cols = starts_with("UHR"), names_to = "Emotion", values_to = "UHR") %>%
   group_by(Expressor, Gender, Expression_Type) %>%
   summarise(Average_UHR = mean(UHR, na.rm = TRUE), .groups = 'drop')
 
@@ -77,10 +82,10 @@ uhr_by_expressor <- uhr_results_filtered %>%
 uhr_by_expressor <- uhr_by_expressor %>%
   mutate(Expression_Type = substr(Expression_Type, 1, 3))
 
-# Step 9: 保存每个 expressor 的 UHR 信息
+# Step 9: 保存每个 Expressor 的 UHR 信息
 write.csv(uhr_by_expressor, "UHR_by_Expressor_and_Emotion.csv", row.names = FALSE)
 
-# Step 10: # 可视化 UHR 数据，并进一步调整横坐标标签和标题字体
+# Step 10: 可视化 UHR 数据，并进一步调整横坐标标签和标题字体
 ggplot(uhr_by_expressor, aes(x = Expression_Type, y = Average_UHR, fill = Gender)) +
   geom_bar(stat = "identity", position = "dodge") +
   facet_wrap(~ Expressor) +
@@ -90,13 +95,12 @@ ggplot(uhr_by_expressor, aes(x = Expression_Type, y = Average_UHR, fill = Gender
        fill = "Gender") +
   theme_minimal() +
   theme(
-    axis.text.x = element_text(angle = 60, hjust = 1, size = 5),  # 进一步缩小字体大小
+    axis.text.x = element_text(angle = 60, hjust = 1, size = 5),
     axis.title.x = element_text(size = 10),
     axis.title.y = element_text(size = 8),
-    plot.title = element_text(size = 12, face = "bold"),  # 调整标题字体大小
-    strip.text = element_text(size = 8)  # 缩小facet标签的字体大小
+    plot.title = element_text(size = 12, face = "bold"),
+    strip.text = element_text(size = 8)
   )
-
 
 # Step 11: 按性别分组并排序 expressors
 uhr_sorted_female <- uhr_by_expressor %>%
@@ -122,62 +126,66 @@ print(uhr_sorted_male)
 write.csv(uhr_sorted_female, "Sorted_Female_Expressors_by_UHR.csv", row.names = FALSE)
 write.csv(uhr_sorted_male, "Sorted_Male_Expressors_by_UHR.csv", row.names = FALSE)
 
+# Step 13: 创建 Fema4 和 Fema84 的选择矩阵
+Fema4_data <- data %>%
+  filter(Expressor == "Fema4")
 
+Fema84_data <- data %>%
+  filter(Expressor == "Fema84")
 
+# 检查数据是否存在
+if (nrow(Fema4_data) == 0) {
+  stop("No data found for Fema4 (Fema4). Please check the Expressor name or data.")
+}
 
+if (nrow(Fema84_data) == 0) {
+  stop("No data found for Fema84 (Fema84). Please check the Expressor name or data.")
+}
 
-
-
-
-
-# Step 4: 创建 Female88 和 Female26 的选择矩阵
-female88_data <- data %>%
-  filter(Expressor == "Fema88")
-
-female26_data <- data %>%
-  filter(Expressor == "Fema26")
-
-female88_matrix <- female88_data %>%
+# 生成混淆矩阵
+Fema4_matrix <- Fema4_data %>%
   group_by(Expression_Type, Chosen_Expression) %>%
   summarise(Count = n(), .groups = 'drop') %>%
   spread(Chosen_Expression, Count, fill = 0)
 
-female26_matrix <- female26_data %>%
+Fema84_matrix <- Fema84_data %>%
   group_by(Expression_Type, Chosen_Expression) %>%
   summarise(Count = n(), .groups = 'drop') %>%
   spread(Chosen_Expression, Count, fill = 0)
 
 # 将 Expression_Type 作为行名
-rownames(female88_matrix) <- female88_matrix$Expression_Type
-female88_matrix <- female88_matrix[ , -1]
+rownames(Fema4_matrix) <- Fema4_matrix$Expression_Type
+Fema4_matrix <- Fema4_matrix[, -1]
 
-rownames(female26_matrix) <- female26_matrix$Expression_Type
-female26_matrix <- female26_matrix[ , -1]
+rownames(Fema84_matrix) <- Fema84_matrix$Expression_Type
+Fema84_matrix <- Fema84_matrix[, -1]
 
-# Step 6: 可视化
-female88_long <- female88_data %>%
+# Step 14: 可视化
+Fema4_long <- Fema4_data %>%
   group_by(Expression_Type, Chosen_Expression) %>%
   summarise(Count = n(), .groups = 'drop')
 
-female26_long <- female26_data %>%
+Fema84_long <- Fema84_data %>%
   group_by(Expression_Type, Chosen_Expression) %>%
   summarise(Count = n(), .groups = 'drop')
 
-female88_long$Expressor <- "Female88"
-female26_long$Expressor <- "Female26"
+# 添加 Expressor 信息
+Fema4_long$Expressor <- "Fema4"
+Fema84_long$Expressor <- "Fema84"
 
-combined_data <- bind_rows(female88_long, female26_long)
+# 合并数据
+combined_data <- bind_rows(Fema4_long, Fema84_long)
 
 # 绘制分类结果的堆叠条形图，调整横坐标标签的字体和角度
 ggplot(combined_data, aes(x = Expression_Type, y = Count, fill = Chosen_Expression)) +
   geom_bar(stat = "identity", position = "stack") +
   facet_wrap(~ Expressor) +
-  labs(title = "Classification Results for Female88 and Female26",
+  labs(title = "Classification Results for Fema4 and Fema84",
        x = "Actual Expression",
        y = "Count of Predictions",
        fill = "Predicted Expression") +
   theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 10), # 调整角度和大小
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 10),
         axis.title.x = element_text(size = 12),
         axis.title.y = element_text(size = 12),
         plot.title = element_text(size = 14, face = "bold"))
