@@ -73,7 +73,7 @@ uhr_results <- uhr_results %>%
 uhr_results_filtered <- uhr_results %>%
   select(Expressor, Gender, Expression_Type, UHR, Chance_UHR)
 
-# Step 7: 计算每个 Expressor 在不同表情类型下的平均 UHR，注意这里的Average_UHR 是包括了 L 和 R 版本的平均值
+# Step 7: 计算每个 Expressor 在不同表情类型下的UHR，注意这里的Average_UHR 是包括了 L 和 R 版本的平均值
 uhr_by_expressor <- uhr_results_filtered %>%
   group_by(Expressor, Gender, Expression_Type) %>%
   summarise(Average_UHR = mean(UHR, na.rm = TRUE), .groups = 'drop')
