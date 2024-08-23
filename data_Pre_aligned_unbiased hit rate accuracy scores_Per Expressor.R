@@ -73,7 +73,7 @@ uhr_results <- uhr_results %>%
 uhr_results_filtered <- uhr_results %>%
   select(Expressor, Gender, Expression_Type, UHR, Chance_UHR)
 
-# Step 7: 计算每个 Expressor 在不同表情类型下的平均 UHR
+# Step 7: 计算每个 Expressor 在不同表情类型下的平均 UHR，注意这里的Average_UHR 是包括了 L 和 R 版本的平均值
 uhr_by_expressor <- uhr_results_filtered %>%
   group_by(Expressor, Gender, Expression_Type) %>%
   summarise(Average_UHR = mean(UHR, na.rm = TRUE), .groups = 'drop')
@@ -126,61 +126,61 @@ print(uhr_sorted_male)
 write.csv(uhr_sorted_female, "Sorted_Female_Expressors_by_UHR.csv", row.names = FALSE)
 write.csv(uhr_sorted_male, "Sorted_Male_Expressors_by_UHR.csv", row.names = FALSE)
 
-# Step 13: 创建 Fema4 和 Fema84 的选择矩阵
-Fema4_data <- data %>%
-  filter(Expressor == "Fema4")
+# Step 13: 创建 Male29 和 Male75 的选择矩阵
+Male29_data <- data %>%
+  filter(Expressor == "Male29")
 
-Fema84_data <- data %>%
-  filter(Expressor == "Fema84")
+Male75_data <- data %>%
+  filter(Expressor == "Male75")
 
 # 检查数据是否存在
-if (nrow(Fema4_data) == 0) {
-  stop("No data found for Fema4 (Fema4). Please check the Expressor name or data.")
+if (nrow(Male29_data) == 0) {
+  stop("No data found for Male29 (Male29). Please check the Expressor name or data.")
 }
 
-if (nrow(Fema84_data) == 0) {
-  stop("No data found for Fema84 (Fema84). Please check the Expressor name or data.")
+if (nrow(Male75_data) == 0) {
+  stop("No data found for Male75 (Male75). Please check the Expressor name or data.")
 }
 
 # 生成混淆矩阵
-Fema4_matrix <- Fema4_data %>%
+Male29_matrix <- Male29_data %>%
   group_by(Expression_Type, Chosen_Expression) %>%
   summarise(Count = n(), .groups = 'drop') %>%
   spread(Chosen_Expression, Count, fill = 0)
 
-Fema84_matrix <- Fema84_data %>%
+Male75_matrix <- Male75_data %>%
   group_by(Expression_Type, Chosen_Expression) %>%
   summarise(Count = n(), .groups = 'drop') %>%
   spread(Chosen_Expression, Count, fill = 0)
 
 # 将 Expression_Type 作为行名
-rownames(Fema4_matrix) <- Fema4_matrix$Expression_Type
-Fema4_matrix <- Fema4_matrix[, -1]
+rownames(Male29_matrix) <- Male29_matrix$Expression_Type
+Male29_matrix <- Male29_matrix[, -1]
 
-rownames(Fema84_matrix) <- Fema84_matrix$Expression_Type
-Fema84_matrix <- Fema84_matrix[, -1]
+rownames(Male75_matrix) <- Male75_matrix$Expression_Type
+Male75_matrix <- Male75_matrix[, -1]
 
 # Step 14: 可视化
-Fema4_long <- Fema4_data %>%
+Male29_long <- Male29_data %>%
   group_by(Expression_Type, Chosen_Expression) %>%
   summarise(Count = n(), .groups = 'drop')
 
-Fema84_long <- Fema84_data %>%
+Male75_long <- Male75_data %>%
   group_by(Expression_Type, Chosen_Expression) %>%
   summarise(Count = n(), .groups = 'drop')
 
 # 添加 Expressor 信息
-Fema4_long$Expressor <- "Fema4"
-Fema84_long$Expressor <- "Fema84"
+Male29_long$Expressor <- "Male29"
+Male75_long$Expressor <- "Male75"
 
 # 合并数据
-combined_data <- bind_rows(Fema4_long, Fema84_long)
+combined_data <- bind_rows(Male29_long, Male75_long)
 
 # 绘制分类结果的堆叠条形图，调整横坐标标签的字体和角度
 ggplot(combined_data, aes(x = Expression_Type, y = Count, fill = Chosen_Expression)) +
   geom_bar(stat = "identity", position = "stack") +
   facet_wrap(~ Expressor) +
-  labs(title = "Classification Results for Fema4 and Fema84",
+  labs(title = "Classification Results for Male29 and Male75",
        x = "Actual Expression",
        y = "Count of Predictions",
        fill = "Predicted Expression") +
