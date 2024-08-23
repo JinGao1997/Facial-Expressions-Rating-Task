@@ -81,6 +81,18 @@ print(uhr_summary)
 uhr_summary <- uhr_summary %>%
   mutate(Arcsine_UHR = asin(sqrt(Unbiased_Hit_Rate)))
 
+# Step 8.1: 检查 Arcsine 转换后的 UHR 数据的正态性
+qqplot_uhr <- ggqqplot(uhr_summary$Arcsine_UHR, title = "Q-Q Plot for Arcsine Transformed UHR")
+
+# 直接显示 Q-Q 图以确保其生成
+print(qqplot_uhr)
+
+# Shapiro-Wilk 正态性检验
+shapiro_test_result <- shapiro.test(uhr_summary$Arcsine_UHR)
+
+# 打印 Shapiro-Wilk 检验结果
+print(shapiro_test_result)
+
 # Step 9: 为重复测量 ANOVA 准备数据
 # 使用 CASE 列作为参与者ID
 participant_data <- data %>%
@@ -93,9 +105,6 @@ aov_results <- aov(Arcsine_UHR ~ Expression_Type + Error(CASE/Expression_Type), 
 
 # 查看ANOVA结果
 summary(aov_results)
-
-# Step 10: 进行重复测量 ANOVA
-aov_results <- aov(Arcsine_UHR ~ Expression_Type + Error(CASE/Expression_Type), data = participant_data)
 
 # Step 11: 进行事后检验 (例如 emmeans 包)
 emms <- emmeans(aov_results, ~ Expression_Type)
