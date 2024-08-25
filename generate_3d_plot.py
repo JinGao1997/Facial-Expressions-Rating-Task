@@ -108,7 +108,7 @@ for j in range(len(y_labels)):
         ax.bar3d(xpos, ypos, zpos, dx, dy, dz, color=color, shade=True, zorder=0)
 
 # 绘制百分比标签，并使用深蓝色标记
-label_color = '#E71012'  # 深蓝色
+label_color = '#FFFFFF'  # 白色
 for i in range(len(x_labels)):
     for j in range(len(y_labels)):
         xpos = x[j, i]
