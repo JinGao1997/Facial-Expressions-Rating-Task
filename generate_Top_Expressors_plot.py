@@ -1,4 +1,3 @@
-# 为Percentage Hit Rate, UHR和Realism维度绘制条形图
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -125,7 +124,7 @@ def plot_combined_data(df):
 # 绘制图表
 plot_combined_data(final_summary)
 
-# 为Arousal维度绘制雷达图
+
 import pandas as pd
 import matplotlib.pyplot as plt
 import numpy as np
