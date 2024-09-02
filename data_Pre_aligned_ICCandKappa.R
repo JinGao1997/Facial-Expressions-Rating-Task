@@ -1,100 +1,187 @@
-# 加载所需的库
-library(dplyr)
-library(tidyr)
-library(irr)
-library(psych)
+# 安装并加载所需的库
+install.packages("lme4")
+install.packages("lmerTest")
+install.packages("readxl")
+install.packages("dplyr")
+install.packages("irr")  # 用于计算 Fleiss' Kappa
+install.packages("tidyr") # 用于数据转换
+
+library(lme4)
+library(lmerTest)
 library(readxl)
+library(dplyr)
+library(irr)
+library(tidyr)
+
+print("Script is running...")
 
 # Step 1: 读取数据
 file_path <- "N:/JinLab/Personal_JG_Lab/R_course/Facial Expressions Rating Task/aligned_data.xlsx"
 my_data <- read_excel(file_path)
 
-# Step 2: 初始化结果数据框
+# 检查数据是否成功加载
+if (exists("my_data")) {
+  print("Data successfully loaded.")
+} else {
+  stop("Error: Data not found. Please check the file path and ensure the data is correctly loaded.")
+}
+
+# Step 2: 根据 Material 列的信息分解为多个维度
+my_data <- my_data %>%
+  mutate(Version = ifelse(grepl("^L", Material), "L", "R"),
+         Gender = ifelse(grepl("Fema", Material), "Female", "Male"),
+         Emotion = case_when(
+           grepl("dis", Material) ~ "Disgust",
+           grepl("enj", Material) ~ "Enjoyment",
+           grepl("aff", Material) ~ "Affiliation",
+           grepl("dom", Material) ~ "Dominance",
+           grepl("neu", Material) ~ "Neutral"
+         ))
+
+# Step 3: 初始化结果数据框
 results <- data.frame(
-  Group = integer(),
+  Group = character(),
   Dimension = character(),
-  Statistic = character(),
-  Value = numeric(),
+  Group_Difference_Significant = logical(),
+  ICC_2_k = numeric(),
+  k = numeric(),
+  Fleiss_Kappa = numeric(),
   stringsAsFactors = FALSE
 )
 
-# Step 3: 获取所有Group的名称
-groups <- unique(my_data$Group)
-
-# Step 4: 遍历每个Group并计算各个维度的ICC和Kappa
-for (group in groups) {
-  print(paste("Processing Group:", group))  # 调试信息
+# Step 4: 检验组间差异、计算 ICC(2,k) 和 Fleiss' Kappa
+for (dimension in c("Arousal_Score", "Realism_Score", "Categorizing_Expressions_Score")) {
   
-  # 筛选出当前Group的数据
-  group_data <- my_data %>% filter(Group == group)
+  print(paste("Running mixed-effects model for Dimension:", dimension))
   
-  # 计算Arousal和Realism的ICC
-  for (dimension in c("Arousal_Score", "Realism_Score")) {
+  if (dimension != "Categorizing_Expressions_Score") {
+    # Step 4.1: 使用 lmer 进行混合效应模型并计算 p-value，加入性别和情绪固定效应
+    model <- lmer(as.formula(paste(dimension, "~ Group + Gender + Emotion + (1|CASE) + (1|Material)")), data = my_data)
+    model_summary <- summary(model)
     
-    # 筛选出当前维度的非NA数据
-    dimension_data <- group_data %>%
-      select(CASE, Material, all_of(dimension)) %>%
-      filter(!is.na(!!sym(dimension)))
+    # 提取 Group 的 p-value
+    group_p_value <- anova(model)["Group", "Pr(>F)"]
     
-    if (nrow(dimension_data) > 1) {
-      # 将数据转换为宽格式（CASE为列）
-      wide_data <- dimension_data %>%
-        pivot_wider(names_from = CASE, values_from = all_of(dimension), values_fill = NA_real_)
-      
-      # 检查每列的变异性
-      variability <- sapply(wide_data, function(x) length(unique(x)) > 1)
-      
-      if (all(variability)) {
-        # 计算ICC(1,1) 使用irr包
-        icc_result <- icc(as.matrix(wide_data[,-1]), model = "oneway", type = "consistency")
-        icc_value <- icc_result$value
+    # 打印 p-value 以检查其值
+    print(paste("p-value for Group:", group_p_value))
+    
+    # 检查 p-value 是否有效并确定是否继续计算 ICC(2,k)
+    if (!is.na(group_p_value)) {
+      if (group_p_value < 0.05) {
+        print(paste("Group differences are significant for", dimension, "(p-value:", group_p_value, "). ICC(2,k) will not be calculated."))
+        results <- rbind(results,
+                         data.frame(Group = NA,
+                                    Dimension = dimension,
+                                    Group_Difference_Significant = TRUE,
+                                    ICC_2_k = NA,
+                                    k = NA,
+                                    Fleiss_Kappa = NA))
+        next
       } else {
-        icc_value <- NA
+        print(paste("Group differences are not significant for", dimension, "(p-value:", group_p_value, "). Proceeding to calculate ICC(2,k)."))
       }
-      
-      # 存储结果
-      results <- rbind(results,
-                       data.frame(Group = group, Dimension = dimension, 
-                                  Statistic = "ICC(1,1)", Value = icc_value))
     } else {
-      # 如果CASE数量不足，存储NA
+      print("p-value is NA, skipping ICC(2,k) calculation.")
       results <- rbind(results,
-                       data.frame(Group = group, Dimension = dimension, 
-                                  Statistic = "ICC(1,1)", Value = NA))
+                       data.frame(Group = NA,
+                                  Dimension = dimension,
+                                  Group_Difference_Significant = NA,
+                                  ICC_2_k = NA,
+                                  k = NA,
+                                  Fleiss_Kappa = NA))
+      next
     }
   }
   
-  # 计算Categorizing_Expressions_Score的Fleiss' Kappa
-  kappa_data <- group_data %>%
-    select(CASE, Material, Categorizing_Expressions_Score) %>%
-    filter(!is.na(Categorizing_Expressions_Score))
+  # 获取所有Group的名称
+  groups <- unique(my_data$Group)
   
-  if (nrow(kappa_data) > 1) {
-    # 转换为矩阵形式（CASE为列）
-    wide_kappa_data <- kappa_data %>%
-      pivot_wider(names_from = CASE, values_from = Categorizing_Expressions_Score, values_fill = NA_real_)
+  for (group in groups) {
+    print(paste("Running model for Group:", group, "Dimension:", dimension))
     
-    # 计算Fleiss' Kappa
-    kappa_result <- kappam.fleiss(as.matrix(wide_kappa_data[,-1]))
-    kappa_value <- kappa_result$value
-  } else {
-    kappa_value <- NA
+    # Step 4.2: 准备数据
+    group_data <- my_data %>%
+      filter(Group == group) %>%
+      select(CASE, Material, Version, Gender, Emotion, Categorizing_Expressions_Score, all_of(dimension)) %>%
+      filter(!is.na(!!sym(dimension)))
+    
+    # 确保group_data中有足够的行进行模型拟合
+    if (nrow(group_data) < 2) {
+      print(paste("Skipping Group:", group, "Dimension:", dimension, "due to insufficient data"))
+      next
+    }
+    
+    if (dimension != "Categorizing_Expressions_Score") {
+      # Step 4.3: 使用 lme4 包构建模型并计算 ICC(2,k)
+      lme4_model <- lmer(as.formula(paste(dimension, "~ 1 + (1|CASE) + (1|Material)")), data = group_data)
+      var_components <- as.data.frame(VarCorr(lme4_model))
+      
+      # 计算 ICC(2,k)
+      num_raters <- length(unique(group_data$CASE))  # 计算k值
+      icc_2_k <- var_components$vcov[1] / (var_components$vcov[1] + (var_components$vcov[2] / num_raters))
+      
+      # 存储结果
+      results <- rbind(results,
+                       data.frame(Group = group,
+                                  Dimension = dimension,
+                                  Group_Difference_Significant = FALSE,
+                                  ICC_2_k = icc_2_k,
+                                  k = num_raters,
+                                  Fleiss_Kappa = NA))
+    } else {
+      # Step 4.4: 计算Categorizing_Expressions_Score的Fleiss' Kappa
+      kappa_data <- group_data %>%
+        select(CASE, Material, Categorizing_Expressions_Score) %>%
+        filter(!is.na(Categorizing_Expressions_Score))
+      
+      if (nrow(kappa_data) > 1) {
+        wide_kappa_data <- kappa_data %>%
+          pivot_wider(names_from = CASE, values_from = Categorizing_Expressions_Score, values_fill = NA_real_)
+        
+        if (ncol(wide_kappa_data) > 1) {  # 确保至少有两个评分者的有效数据
+          kappa_result <- kappam.fleiss(as.matrix(wide_kappa_data[,-1]))
+          kappa_value <- kappa_result$value
+        } else {
+          kappa_value <- NA
+        }
+      } else {
+        kappa_value <- NA
+      }
+      
+      # 存储Fleiss' Kappa结果
+      results <- rbind(results,
+                       data.frame(Group = group,
+                                  Dimension = dimension,
+                                  Group_Difference_Significant = FALSE,
+                                  ICC_2_k = NA,
+                                  k = NA,
+                                  Fleiss_Kappa = kappa_value))
+    }
   }
-  
-  # 存储结果
-  results <- rbind(results,
-                   data.frame(Group = group, Dimension = "Categorizing_Expressions_Score", 
-                              Statistic = "Fleiss' Kappa", Value = kappa_value))
 }
 
-# Step 5: 输出结果
-print("Summary of ICC and Kappa results:")
+# Step 5: 计算组内平均值
+average_results <- results %>%
+  group_by(Dimension) %>%
+  summarise(
+    Group_Difference_Significant = NA,
+    ICC_2_k = mean(ICC_2_k, na.rm = TRUE),
+    k = mean(k, na.rm = TRUE),
+    Fleiss_Kappa = mean(Fleiss_Kappa, na.rm = TRUE)
+  ) %>%
+  mutate(Group = "All_Groups_Average")
+
+# 将平均值结果合并回原始结果
+results <- bind_rows(results, average_results)
+
+# Step 6: 输出结果
+print("Summary of ICC(2,k), Fleiss' Kappa, and Group Difference results:")
 print(results)
 
-# Step 6: 将结果保存为CSV文件
-write.csv(results, "N:/JinLab/Personal_JG_Lab/R_course/Facial Expressions Rating Task/ICC_and_Kappa_results_by_Group.csv", row.names = FALSE)
+# Step 7: 将结果保存为CSV文件
+write.csv(results, "N:/JinLab/Personal_JG_Lab/R_course/Facial Expressions Rating Task/ICC_2_k_and_Fleiss_Kappa_results.csv", row.names = FALSE)
 
-
+print("Script completed successfully.")
 
 # Interpretation of the parameter ------------------------------------------
 
@@ -118,3 +205,4 @@ write.csv(results, "N:/JinLab/Personal_JG_Lab/R_course/Facial Expressions Rating
 #0.5 ≤ ICC < 0.75: Indicates moderate reliability. The measurements are somewhat consistent, but there is still a considerable amount of variability.
 #0.75 ≤ ICC < 0.9: Indicates good reliability. The measurements are fairly consistent across raters or conditions.
 #ICC ≥ 0.9: Indicates excellent reliability. The measurements are highly consistent across raters or conditions.
+
