@@ -1,10 +1,11 @@
-# 加载所需的库
+# 安装并加载所需的库
 install.packages("readxl")
 install.packages("dplyr")
 install.packages("tidyr")
 install.packages("car")  # 用于 ANOVA
 install.packages("emmeans")  # 用于事后检验
 install.packages("writexl")  # 用于保存结果
+install.packages("ggpubr")  # 用于 Q-Q plot
 
 library(readxl)
 library(dplyr)
@@ -13,6 +14,7 @@ library(car)
 library(emmeans)
 library(writexl)
 library(ggplot2)  # 用于可视化
+library(ggpubr)   # 用于生成 Q-Q 图
 
 # Step 1: 读取数据
 file_path <- "N:/JinLab/Personal_JG_Lab/R_course/Facial Expressions Rating Task/aligned_data.xlsx"
@@ -84,7 +86,7 @@ uhr_summary <- uhr_summary %>%
 # Step 8.1: 检查 Arcsine 转换后的 UHR 数据的正态性
 qqplot_uhr <- ggqqplot(uhr_summary$Arcsine_UHR, title = "Q-Q Plot for Arcsine Transformed UHR")
 
-# 直接显示 Q-Q 图以确保其生成
+# 显示 Q-Q 图
 print(qqplot_uhr)
 
 # Shapiro-Wilk 正态性检验
@@ -141,12 +143,12 @@ confusion_matrix <- data %>%
   count(Expression_Type, Chosen_Expression) %>%
   spread(Chosen_Expression, n, fill = 0)
 
-# Add row and column totals
+# 添加行列总和
 confusion_matrix <- confusion_matrix %>%
   mutate(Total = rowSums(.[-1])) %>%
   add_row(Expression_Type = "Total", !!!colSums(confusion_matrix[-1]))
 
-# Print the confusion matrix
+# 打印混淆矩阵
 print(confusion_matrix)
 
 # Step 14: 比较实际 UHR 与期望 UHR：计算期望的机会水平 UHR，并与观察到的 UHR 进行比较
@@ -158,18 +160,35 @@ chosen_expression_probs <- data %>%
   count(Chosen_Expression) %>%
   mutate(Prob_Chosen_Expression = n / sum(n))
 
+# 合并概率数据并确保列名一致
 expected_probs <- expression_probs %>%
-  full_join(chosen_expression_probs, by = c("Expression_Type" = "Chosen_Expression")) %>%
-  mutate(Chance_Unbiased_Hit_Rate = Prob_Expression_Type * Prob_Chosen_Expression) %>%
-  select(Expression_Type, Chance_Unbiased_Hit_Rate)
+  full_join(chosen_expression_probs, by = c("Expression_Type" = "Chosen_Expression"))
 
+# 检查合并后的列名
+names(expected_probs)
+
+# 计算期望的无偏命中率
+expected_probs <- expected_probs %>%
+  mutate(Chance_Unbiased_Hit_Rate = Prob_Expression_Type * Prob_Chosen_Expression)
+
+# 再次检查是否成功生成 Chance_Unbiased_Hit_Rate 列
+print(expected_probs)
+
+# 选择所需的列，显式调用 dplyr::select
+expected_probs <- expected_probs %>%
+  dplyr::select(Expression_Type, Chance_Unbiased_Hit_Rate)
+
+# 检查选择的列
+print(expected_probs)
+
+# 最终比较实际 UHR 和期望 UHR
 uhr_comparison <- uhr_summary %>%
   left_join(expected_probs, by = "Expression_Type") %>%
   mutate(
     Performance_Above_Chance = Unbiased_Hit_Rate - Chance_Unbiased_Hit_Rate
   )
 
-# Print comparison
+# 打印比较结果
 print("Comparison of observed UHR with expected chance-level UHR:")
 print(uhr_comparison)
 
