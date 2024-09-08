@@ -37,40 +37,46 @@ percentage_hit_rate <- data %>%
   summarise(Hit_Rate = mean(Correct, na.rm = TRUE)) %>%
   ungroup()
 
-# Step 5: 计算描述性统计信息
+# Step 5: 对 Hit Rate 进行 Arcsine 变换
+percentage_hit_rate <- percentage_hit_rate %>%
+  mutate(Arcsine_Hit_Rate = asin(sqrt(Hit_Rate)))
+
+# Step 6: 计算描述性统计信息（基于 Arcsine 变换后的数据）
 hit_rate_summary <- percentage_hit_rate %>%
   group_by(Expression_Type) %>%
   summarise(
-    Mean_Hit_Rate = mean(Hit_Rate),
-    SD_Hit_Rate = sd(Hit_Rate),
+    Mean_Arcsine_Hit_Rate = mean(Arcsine_Hit_Rate),
+    SD_Arcsine_Hit_Rate = sd(Arcsine_Hit_Rate),
     N = n()
   )
 
-# Step 6: 执行 ANOVA 分析
-anova_model <- aov(Hit_Rate ~ Expression_Type, data = percentage_hit_rate)
+# 输出描述性统计结果
+print(hit_rate_summary)
+
+# Step 7: 执行 ANOVA 分析（基于 Arcsine 变换后的数据）
+anova_model <- aov(Arcsine_Hit_Rate ~ Expression_Type, data = percentage_hit_rate)
 anova_summary <- summary(anova_model)
 
-# Step 7: 执行 Tukey HSD 事后检验
+# Step 8: 执行 Tukey HSD 事后检验
 tukey_hsd <- TukeyHSD(anova_model)
 
-# Step 8: 将统计结果保存到文本文件
-sink("statistical_results.txt")
-cat("Descriptive Statistics for Percentage Hit Rate:\n")
+# Step 9: 将统计结果保存到文本文件
+sink("Percentage_Hit_Rate_Arcsine_ANOVA.txt")
+cat("Descriptive Statistics for Arcsine Transformed Percentage Hit Rate:\n")
 print(hit_rate_summary)
-cat("\nANOVA Results for Hit Rate:\n")
+cat("\nANOVA Results for Arcsine Transformed Hit Rate:\n")
 print(anova_summary)
 cat("\nTukey HSD Post-Hoc Test Results:\n")
 print(tukey_hsd)
 sink()
 
-# Step 9: 可视化 Percentage Hit Rate 的条形图，优化比例
-p <- ggplot(percentage_hit_rate, aes(x = Expression_Type, y = Hit_Rate, fill = Expression_Type)) +
+# Step 10: 可视化 Arcsine Hit Rate 的条形图
+p <- ggplot(percentage_hit_rate, aes(x = Expression_Type, y = Arcsine_Hit_Rate, fill = Expression_Type)) +
   geom_bar(stat = "identity", color = "black", position = position_dodge(), width = 0.6) +
-  geom_errorbar(aes(ymin = Hit_Rate - sd(Hit_Rate), ymax = Hit_Rate + sd(Hit_Rate)), width = 0.2, position = position_dodge(0.9)) +
-  scale_y_continuous(labels = scales::percent_format(accuracy = 1), limits = c(0, 1)) +
-  scale_fill_brewer(palette = "Set3") +
-  labs(title = "Bar Plot of Mean Percentage Hit Rate by Expression Type",
-       x = "Expression Type", y = "Mean Percentage Hit Rate") +
+  geom_errorbar(aes(ymin = Arcsine_Hit_Rate - sd(Arcsine_Hit_Rate), ymax = Arcsine_Hit_Rate + sd(Arcsine_Hit_Rate)), 
+                width = 0.2, position = position_dodge(0.9)) +
+  labs(title = "Bar Plot of Arcsine Transformed Hit Rate by Expression Type",
+       x = "Expression Type", y = "Arcsine Transformed Hit Rate") +
   theme_minimal(base_size = 15) +
   theme(legend.position = "none",
         plot.title = element_text(hjust = 0.5, face = "bold"),
@@ -81,7 +87,7 @@ p <- ggplot(percentage_hit_rate, aes(x = Expression_Type, y = Hit_Rate, fill = E
 print(p)
 
 # 使用 ggsave 保存图形，调整宽高比
-ggsave("percentage_hit_rate_plot.png", plot = p, width = 10, height = 6, dpi = 300)
+ggsave("arcsine_hit_rate_plot.png", plot = p, width = 10, height = 6, dpi = 300)
 
 # 打印完成信息
-cat("Analysis complete. Results saved to 'statistical_results.txt' and 'percentage_hit_rate_plot.png'.\n")
+cat("Analysis complete. Results saved to 'Percentage_Hit_Rate_Arcsine_ANOVA.txt' and 'arcsine_hit_rate_plot.png'.\n")
