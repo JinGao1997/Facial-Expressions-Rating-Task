@@ -17,7 +17,7 @@ expression_colors = {
 file_path = 'aligned_data.xlsx'
 data = pd.read_excel(file_path)
 
-# 从Material列中提取intended expressions
+# 从 Material 列中提取 intended expressions
 def get_intended_expression(material):
     if 'enj' in material:
         return 'Enjoyment'
@@ -34,7 +34,7 @@ def get_intended_expression(material):
 
 data['Intended_Expression'] = data['Material'].apply(get_intended_expression)
 
-# 映射chosen expressions
+# 映射 chosen expressions
 mapping = {1: 'Enjoyment', 2: 'Affiliation', 3: 'Dominance', 4: 'Disgust', 5: 'Neutral', 6: 'Other'}
 data['Chosen_Expression'] = data['Categorizing_Expressions_Score'].map(mapping)
 
@@ -53,7 +53,14 @@ confusion_matrix = confusion_matrix[chosen_order]
 # 对行和列按照指定的顺序进行排序
 confusion_matrix = confusion_matrix.reindex(intended_order)
 
-# 准备3D绘图数据
+# 保存混淆矩阵为 CSV 和 Excel 文件
+confusion_matrix.to_csv('confusion_matrix_HitRate.csv')
+confusion_matrix.to_excel('confusion_matrix_HitRate.xlsx')
+
+# 打印保存成功信息
+print("Confusion matrix saved as 'confusion_matrix_output.csv' and 'confusion_matrix_output.xlsx'.")
+
+# 准备 3D 绘图数据
 x_labels = confusion_matrix.columns
 y_labels = confusion_matrix.index
 height = confusion_matrix.values
@@ -108,7 +115,7 @@ for j in range(len(y_labels)):
         ax.bar3d(xpos, ypos, zpos, dx, dy, dz, color=color, shade=True, zorder=0)
 
 # 绘制百分比标签，并使用深蓝色标记
-label_color = '#FC0209'  # 亮红色
+label_color = '#FFFFFF'  # 白色
 for i in range(len(x_labels)):
     for j in range(len(y_labels)):
         xpos = x[j, i]
@@ -116,19 +123,19 @@ for i in range(len(x_labels)):
         dz = height[j, i]
 
         if dz >= 5:
-            ax.text(xpos + 0.4, ypos + 0.4, dz + 0, f'{int(dz)}%', 
-                    ha='center', va='bottom', color=label_color, fontsize=10, weight='bold', zorder=1000)
+            ax.text(xpos + 0.4, ypos + 0.4, dz + 0, f'{dz:.1f}%', 
+                    ha='center', va='bottom', color=label_color, fontsize=8, weight='bold', zorder=1000)
 
 # 设置轴标签
 ax.set_xlabel('Chosen Expression', labelpad=20)
 ax.set_ylabel('Intended Expression', labelpad=20)
-ax.set_zlabel('Percentage', labelpad=10)
+ax.set_zlabel('Percentage', labelpad=20)
 
 # 设置刻度标签，调整 Intended Expression 标签的位置
 ax.set_xticks(np.arange(len(x_labels)) + 0.1)
-ax.set_xticklabels(x_labels, rotation=60, ha='right', fontsize=10, va='center_baseline')
+ax.set_xticklabels(x_labels, rotation=60, ha='right', fontsize=9.5, va='center_baseline')
 ax.set_yticks(np.arange(len(y_labels)) - 0.2)
-ax.set_yticklabels(y_labels, fontsize=10, va='center_baseline', position=(-0.15, 0))  # 调整 position 参数
+ax.set_yticklabels(y_labels, fontsize=9.5, va='center_baseline', position=(-0.15, 0))
 
 # 设置标题
 ax.set_title('Percentage of Chosen Emotions per Intended Emotional Expression', pad=15)
@@ -136,5 +143,11 @@ ax.set_title('Percentage of Chosen Emotions per Intended Emotional Expression', 
 # 调整视角
 ax.view_init(elev=43, azim=55)
 
+# 保存图形为图片
+plt.savefig('confusion_matrix_3d_plot.png', dpi=300)
+
 # 显示图形
 plt.show()
+
+# 打印保存成功信息
+print("3D confusion matrix plot saved as 'confusion_matrix_3d_plot.png'.")
