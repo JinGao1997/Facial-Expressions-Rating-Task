@@ -1,33 +1,25 @@
-# 安装并加载所需的库
-install.packages("readxl")
-install.packages("dplyr")
-install.packages("tidyr")
-install.packages("car")  # 用于 ANOVA
-install.packages("emmeans")  # 用于事后检验
-install.packages("writexl")  # 用于保存结果
-install.packages("ggpubr")  # 用于 Q-Q plot
-
-library(readxl)
+# 加载必要的R包
 library(dplyr)
 library(tidyr)
-library(car)
-library(emmeans)
-library(writexl)
-library(ggplot2)  # 用于可视化
-library(ggpubr)   # 用于生成 Q-Q 图
+library(readxl)
+library(openxlsx)
+library(car)  # 用于ANOVA
+library(emmeans)  # 用于事后检验
+library(ggplot2)  # 可视化
+library(ggpubr)   # Q-Q 图
 
 # Step 1: 读取数据
-file_path <- "N:/JinLab/Personal_JG_Lab/R_course/Facial Expressions Rating Task/aligned_data.xlsx"
+file_path <- "aligned_data.xlsx"
 data <- read_excel(file_path)
 
 # Step 2: 从 Material 列中提取表情类型
 data <- data %>%
   mutate(Expression_Type = case_when(
-    grepl("dis", Material) ~ "Disgust",
-    grepl("enj", Material) ~ "Enjoyment",
-    grepl("aff", Material) ~ "Affiliation",
-    grepl("dom", Material) ~ "Dominance",
-    grepl("neu", Material) ~ "Neutral",
+    grepl("dis", Material, ignore.case = TRUE) ~ "Disgust",
+    grepl("enj", Material, ignore.case = TRUE) ~ "Enjoyment",
+    grepl("aff", Material, ignore.case = TRUE) ~ "Affiliation",
+    grepl("dom", Material, ignore.case = TRUE) ~ "Dominance",
+    grepl("neu", Material, ignore.case = TRUE) ~ "Neutral",
     TRUE ~ "Other"
   ))
 
@@ -40,79 +32,133 @@ data <- data %>%
     Categorizing_Expressions_Score == 4 ~ "Disgust", 
     Categorizing_Expressions_Score == 5 ~ "Neutral", 
     Categorizing_Expressions_Score == 6 ~ "Other",
-    TRUE ~ NA_character_  # 如果遇到未匹配的值，将其设为 NA
+    TRUE ~ NA_character_
   ))
 
-# Step 4: 创建选择矩阵
-choice_matrix <- data %>%
-  count(Expression_Type, Chosen_Expression) %>%
-  spread(Chosen_Expression, n, fill = 0)
+# 初始化存储结果的数据框
+results <- data.frame(
+  CASE = integer(),
+  Expression_Type = character(),
+  UHR = numeric(),
+  Chance_UHR = numeric(),
+  Performance_Above_Chance = numeric(),
+  stringsAsFactors = FALSE
+)
 
-# Step 5: 计算行边际值和列边际值
-row_margins <- rowSums(choice_matrix[,-1])
-col_margins <- colSums(choice_matrix[,-1])
-
-# Step 6: 计算 UHR，包括 "Other" 对其他表情的影响
-uhr_values <- mapply(function(row, col, value, row_type, col_type) {
-  if (row_type == "Other" || col_type == "Other") {
-    return(0)  # 假设 "Other" 的行和列对最终 UHR 不贡献直接值
-  } else if (row == 0 || col == 0) {
-    return(0)
-  } else {
-    return((value^2) / (row * col))
+# Step 4: 定义 UHR 和 Chance UHR 计算函数
+calculate_uhr_chance_uhr <- function(conf_matrix) {
+  uhr_results <- numeric(length(rownames(conf_matrix)))
+  chance_uhr_results <- numeric(length(rownames(conf_matrix)))
+  N <- sum(conf_matrix)  # 总和 N
+  
+  for (i in seq_along(rownames(conf_matrix))) {
+    emotion <- rownames(conf_matrix)[i]
+    a <- conf_matrix[emotion, emotion]  # 对角线元素
+    b <- sum(conf_matrix[emotion, ]) - a  # 行中的非对角线元素之和
+    d <- sum(conf_matrix[, emotion]) - a  # 列中的非对角线元素之和
+    
+    # 检查 b 和 d 是否为0，避免除以零
+    if ((a + b) > 0 & (a + d) > 0 & N > 0) {
+      UHR <- (a / (a + b)) * (a / (a + d))
+      Pc <- ((a + b) / N) * ((a + d) / N)
+    } else {
+      UHR <- 0
+      Pc <- 0
+    }
+    
+    uhr_results[i] <- UHR
+    chance_uhr_results[i] <- Pc
   }
-}, 
-row = rep(row_margins, times = length(col_margins)), 
-col = rep(col_margins, each = length(row_margins)), 
-value = as.vector(as.matrix(choice_matrix[,-1])),
-row_type = rep(choice_matrix$Expression_Type, times = length(col_margins)),
-col_type = rep(names(choice_matrix)[-1], each = length(row_margins)))
+  
+  return(list(UHR = uhr_results, Chance_UHR = chance_uhr_results))
+}
 
-# 将 UHR 值转为矩阵形式并计算最终 UHR
-uhr_matrix <- matrix(uhr_values, nrow = nrow(choice_matrix), ncol = ncol(choice_matrix) - 1, byrow = TRUE)
-uhr_final <- rowSums(uhr_matrix)
+# 初始化存储不完整数据的CASE列表
+incomplete_cases <- list()
 
-# Step 7: 过滤掉 "Other" 作为实际表情类型，并显示结果
-uhr_summary <- data.frame(Expression_Type = choice_matrix$Expression_Type, Unbiased_Hit_Rate = uhr_final)
-uhr_summary <- uhr_summary %>% filter(Expression_Type != "Other")
+# Step 5: 按 CASE 计算 UHR 和 Chance UHR
+cases <- unique(data$CASE)
+expected_emotions <- c("Affiliation", "Disgust", "Dominance", "Enjoyment", "Neutral")
+# 检查每个参与者的选择矩阵是否包含所有预期的情绪类别
+for (case in cases) {
+  # 筛选出当前CASE的数据
+  case_data <- data %>% filter(CASE == case)
+  
+  # 创建选择矩阵，排除 "Other" 类别
+  choice_matrix <- case_data %>%
+    filter(Expression_Type != "Other", Chosen_Expression != "Other") %>%
+    count(Expression_Type, Chosen_Expression) %>%
+    spread(key = Chosen_Expression, value = n, fill = 0) %>%
+    complete(Expression_Type = expected_emotions, fill = list(n = 0))
+  
+  # 转换为普通数据框以支持行名
+  choice_matrix <- as.data.frame(choice_matrix)
+  
+  # 检查是否包含所有预期的表情类别
+  missing_emotions <- setdiff(expected_emotions, colnames(choice_matrix))
+  
+  # 如果有缺失情绪类别，记录CASE并跳过此CASE的计算
+  if (length(missing_emotions) > 0) {
+    incomplete_cases[[length(incomplete_cases) + 1]] <- list(CASE = case, Missing_Emotions = missing_emotions)
+    cat("Warning: Missing emotions in CASE", case, "- Missing:", missing_emotions, "\n")
+    next
+  }
+  
+  # 正常进行 UHR 和 Chance UHR 计算
+  rownames(choice_matrix) <- choice_matrix$Expression_Type
+  choice_matrix <- choice_matrix[, -1]
+  
+  # 将数据框转换为矩阵
+  choice_matrix <- as.matrix(choice_matrix)
+  
+  # 打印选择矩阵以确认其内容
+  print(choice_matrix)
 
-# 打印 UHR 结果
-print(uhr_summary)
+  # 计算 UHR 和 Chance UHR
+  uhr_chance_results <- calculate_uhr_chance_uhr(conf_matrix = choice_matrix)
+  
+  for (i in seq_along(expected_emotions)) {
+    results <- rbind(results, data.frame(
+      CASE = case,
+      Expression_Type = expected_emotions[i],
+      UHR = uhr_chance_results$UHR[i],
+      Chance_UHR = uhr_chance_results$Chance_UHR[i],
+      Performance_Above_Chance = uhr_chance_results$UHR[i] - uhr_chance_results$Chance_UHR[i]
+    ))
+  }
+}
 
-# Step 8: Arcsine transformation of UHR
-uhr_summary <- uhr_summary %>%
-  mutate(Arcsine_UHR = asin(sqrt(Unbiased_Hit_Rate)))
 
-# Step 8.1: 检查 Arcsine 转换后的 UHR 数据的正态性
-qqplot_uhr <- ggqqplot(uhr_summary$Arcsine_UHR, title = "Q-Q Plot for Arcsine Transformed UHR")
+# 打印结果
+print(results)
 
-# 显示 Q-Q 图
-print(qqplot_uhr)
+# Step 6: Arcsine transformation of UHR
+results <- results %>%
+  mutate(Arcsine_UHR = asin(sqrt(UHR)))
 
-# Shapiro-Wilk 正态性检验
-shapiro_test_result <- shapiro.test(uhr_summary$Arcsine_UHR)
+# Step 7: 计算不同 Expression_Type 的 UHR 和 Chance UHR 平均数和标准差
+uhr_stats <- results %>%
+  group_by(Expression_Type) %>%
+  summarise(
+    Mean_UHR = mean(UHR, na.rm = TRUE),
+    SD_UHR = sd(UHR, na.rm = TRUE),
+    Mean_Chance_UHR = mean(Chance_UHR, na.rm = TRUE),
+    SD_Chance_UHR = sd(Chance_UHR, na.rm = TRUE)
+  )
 
-# 打印 Shapiro-Wilk 检验结果
-print(shapiro_test_result)
+# 保存 UHR 和 Chance UHR 的平均数和标准差到 CSV 文件
+write.csv(uhr_stats, "UHR_ChanceUHR_Avg_SD.csv", row.names = FALSE)
+# Step 7: 进行重复测量 ANOVA
+aov_results <- aov(Arcsine_UHR ~ Expression_Type + Error(CASE/Expression_Type), data = results)
 
-# Step 9: 为重复测量 ANOVA 准备数据
-# 使用 CASE 列作为参与者ID
-participant_data <- data %>%
-  left_join(uhr_summary, by = "Expression_Type") %>%
-  group_by(CASE, Expression_Type) %>%
-  summarise(Arcsine_UHR = mean(Arcsine_UHR, na.rm = TRUE), .groups = 'drop')
-
-# Step 10: 进行重复测量 ANOVA
-aov_results <- aov(Arcsine_UHR ~ Expression_Type + Error(CASE/Expression_Type), data = participant_data)
-
-# 查看ANOVA结果
+# 查看 ANOVA 结果
 summary(aov_results)
 
-# Step 11: 进行事后检验 (例如 emmeans 包)
+# Step 8: 进行事后检验
 emms <- emmeans(aov_results, ~ Expression_Type)
 pairwise_comparison <- pairs(emms)
 
-# 保存 ANOVA 结果和事后检验结果为同一个文本文件
+# 保存 ANOVA 结果和事后检验结果
 capture.output({
   cat("ANOVA Results:\n")
   print(summary(aov_results))
@@ -120,8 +166,8 @@ capture.output({
   print(pairwise_comparison)
 }, file = "analysis_ANOVA_UHR.txt")
 
-# Step 12: 可视化 UHR 方差分析的结果
-mean_uhr <- participant_data %>%
+# Step 9: 可视化结果
+mean_uhr <- results %>%
   group_by(Expression_Type) %>%
   summarise(
     Mean_UHR = mean(Arcsine_UHR, na.rm = TRUE),
@@ -138,59 +184,5 @@ ggplot(mean_uhr, aes(x = Expression_Type, y = Mean_UHR)) +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 10))
 
-# Step 13: 手动构建混淆矩阵以检验
-confusion_matrix <- data %>%
-  count(Expression_Type, Chosen_Expression) %>%
-  spread(Chosen_Expression, n, fill = 0)
-
-# 添加行列总和
-confusion_matrix <- confusion_matrix %>%
-  mutate(Total = rowSums(.[-1])) %>%
-  add_row(Expression_Type = "Total", !!!colSums(confusion_matrix[-1]))
-
-# 打印混淆矩阵
-print(confusion_matrix)
-
-# Step 14: 比较实际 UHR 与期望 UHR：计算期望的机会水平 UHR，并与观察到的 UHR 进行比较
-expression_probs <- data %>%
-  count(Expression_Type) %>%
-  mutate(Prob_Expression_Type = n / sum(n))
-
-chosen_expression_probs <- data %>%
-  count(Chosen_Expression) %>%
-  mutate(Prob_Chosen_Expression = n / sum(n))
-
-# 合并概率数据并确保列名一致
-expected_probs <- expression_probs %>%
-  full_join(chosen_expression_probs, by = c("Expression_Type" = "Chosen_Expression"))
-
-# 检查合并后的列名
-names(expected_probs)
-
-# 计算期望的无偏命中率
-expected_probs <- expected_probs %>%
-  mutate(Chance_Unbiased_Hit_Rate = Prob_Expression_Type * Prob_Chosen_Expression)
-
-# 再次检查是否成功生成 Chance_Unbiased_Hit_Rate 列
-print(expected_probs)
-
-# 选择所需的列，显式调用 dplyr::select
-expected_probs <- expected_probs %>%
-  dplyr::select(Expression_Type, Chance_Unbiased_Hit_Rate)
-
-# 检查选择的列
-print(expected_probs)
-
-# 最终比较实际 UHR 和期望 UHR
-uhr_comparison <- uhr_summary %>%
-  left_join(expected_probs, by = "Expression_Type") %>%
-  mutate(
-    Performance_Above_Chance = Unbiased_Hit_Rate - Chance_Unbiased_Hit_Rate
-  )
-
-# 打印比较结果
-print("Comparison of observed UHR with expected chance-level UHR:")
-print(uhr_comparison)
-
-# 保存比较结果为CSV文件
-write.csv(uhr_comparison, "UHR_Comparison_with_Chance.csv", row.names = FALSE)
+# 保存结果
+write.xlsx(results, "uhr_results_all_cases.xlsx", rowNames = FALSE)
