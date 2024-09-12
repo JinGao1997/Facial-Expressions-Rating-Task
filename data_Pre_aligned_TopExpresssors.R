@@ -216,19 +216,10 @@ mann_whitney_results <- list()
 effect_sizes <- list()
 
 # 进行 Mann-Whitney U 检验和计算 Cohen's d
-alpha <- 0.05 / length(dimensions)  # Bonferroni-corrected alpha level
-
 for (dim in dimensions) {
   # Mann-Whitney U 检验
   test_result <- wilcox.test(male_data[[dim]], female_data[[dim]], exact = FALSE)
-  
-  # 应用 Bonferroni 校正
-  corrected_p_value <- test_result$p.value * length(dimensions)  # Apply Bonferroni correction
-  
-  # 将结果存储到列表
-  mann_whitney_results[[dim]] <- c("U-statistic" = test_result$statistic, 
-                                   "p-value" = test_result$p.value, 
-                                   "Bonferroni-corrected p-value" = min(corrected_p_value, 1))  # p-values cannot exceed 1
+  mann_whitney_results[[dim]] <- c("U-statistic" = test_result$statistic, "p-value" = test_result$p.value)
   
   # 计算 Cohen's d
   d_value <- cohen.d(male_data[[dim]], female_data[[dim]])$estimate
@@ -240,17 +231,17 @@ mann_whitney_df <- do.call(rbind, mann_whitney_results) %>% as.data.frame()
 effect_sizes_df <- data.frame(Dimension = names(effect_sizes), `Cohen's d` = unlist(effect_sizes))
 
 # 查看结果
-print("Mann-Whitney U Test Results with Bonferroni Correction:")
+print("Mann-Whitney U Test Results:")
 options(scipen = 999)  # 这会减少使用科学计数法的倾向
 print(mann_whitney_df)
+
 
 print("Effect Size (Cohen's d) Results:")
 print(effect_sizes_df)
 
 # 保存结果为CSV文件
-write.csv(mann_whitney_df, "Mann_Whitney_U_Gender_FourDimensions_Bonferroni.csv", row.names = TRUE)
+write.csv(mann_whitney_df, "Mann_Whitney_U_Gender_FourDimensions.csv", row.names = TRUE)
 write.csv(effect_sizes_df, "Effect_Size_Cohens_d_Gender_FourDimensions.csv", row.names = FALSE)
-
 
 ## Interpretation of Results:
 # - The Mann-Whitney U test results show the U-statistic and p-value for each dimension.
