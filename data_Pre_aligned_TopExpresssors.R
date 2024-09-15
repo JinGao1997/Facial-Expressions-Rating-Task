@@ -1,13 +1,6 @@
-# 加载所需的库
-install.packages("readxl")
-install.packages("dplyr")
-install.packages("tidyr")
-install.packages("ggplot2")
-install.packages("stringr")
-install.packages("writexl")
-install.packages("gridExtra")
-install.packages("ggpubr")
-install.packages("car")
+# 加载必要的库
+# 请确保仅在需要时安装包，以避免重复安装
+# install.packages(c("readxl", "dplyr", "tidyr", "ggplot2", "stringr", "writexl", "gridExtra", "ggpubr", "car", "pheatmap", "RColorBrewer", "effsize"))
 
 library(readxl)
 library(dplyr)
@@ -18,6 +11,10 @@ library(writexl)
 library(gridExtra)
 library(ggpubr)
 library(car)
+library(pheatmap)
+library(RColorBrewer)
+library(effsize)
+library(tibble)  # 用于处理数据框
 
 # Step 1: 读取数据
 file_path <- "N:/JinLab/Personal_JG_Lab/R_course/Facial Expressions Rating Task/aligned_data.xlsx"
@@ -27,19 +24,20 @@ data <- read_excel(file_path)
 data <- data %>%
   mutate(
     Expression_Type = case_when(
-      grepl("dis", Material) ~ "Disgust",
-      grepl("enj", Material) ~ "Enjoyment",
-      grepl("aff", Material) ~ "Affiliation",
-      grepl("dom", Material) ~ "Dominance",
-      grepl("neu", Material) ~ "Neutral",
+      grepl("dis", Material, ignore.case = TRUE) ~ "Disgust",
+      grepl("enj", Material, ignore.case = TRUE) ~ "Enjoyment",
+      grepl("aff", Material, ignore.case = TRUE) ~ "Affiliation",
+      grepl("dom", Material, ignore.case = TRUE) ~ "Dominance",
+      grepl("neu", Material, ignore.case = TRUE) ~ "Neutral",
       TRUE ~ "Other"
     ),
     Expressor = str_extract(Material, "Fema\\d+|Male\\d+"),
     Gender = case_when(
       str_detect(Material, "Fema") ~ "Female",
-      str_detect(Material, "Male") ~ "Male"
+      str_detect(Material, "Male") ~ "Male",
+      TRUE ~ NA_character_
     ),
-    Expressor_Short = str_replace(Expressor, "Fema", "F") %>% str_replace("Male", "M")
+    Expressor_Short = str_replace_all(Expressor, c("Fema" = "F", "Male" = "M"))
   )
 
 # Step 3: 筛选并排序 Expressors
@@ -60,8 +58,8 @@ target_male_expressors <- c("Male29", "Male37", "Male73", "Male45", "Male35",
 filtered_data <- data %>%
   filter(Expressor %in% c(target_female_expressors, target_male_expressors)) %>%
   mutate(
-    Expressor_Short = factor(Expressor_Short, levels = c(str_replace(target_female_expressors, "Fema", "F"), 
-                                                         str_replace(target_male_expressors, "Male", "M")))
+    Expressor_Short = factor(Expressor_Short, levels = c(str_replace_all(target_female_expressors, c("Fema" = "F")), 
+                                                         str_replace_all(target_male_expressors, c("Male" = "M"))))
   ) %>%
   arrange(Expressor_Short)
 
@@ -74,7 +72,15 @@ filtered_data <- filtered_data %>%
       Categorizing_Expressions_Score == 6 ~ NA_real_,
       expression_mapping[Expression_Type] == Categorizing_Expressions_Score ~ 1,
       TRUE ~ 0
-    )
+    ),
+    Chosen_Expression = dplyr::recode(Categorizing_Expressions_Score,
+                                      `1` = "Enjoyment",
+                                      `2` = "Affiliation",
+                                      `3` = "Dominance",
+                                      `4` = "Disgust",
+                                      `5` = "Neutral",
+                                      `6` = "Other",
+                                      .default = NA_character_)
   )
 
 summary_data <- filtered_data %>%
@@ -87,49 +93,72 @@ summary_data <- filtered_data %>%
   ungroup()
 
 # Step 5: 计算 UHR (Unbiased Hit Rate)
-uhr_data <- filtered_data %>%
-  group_by(Expressor_Short, Gender, Expression_Type, Chosen_Expression = Categorizing_Expressions_Score) %>%
-  summarise(n = n(), .groups = 'drop') %>%
-  spread(Chosen_Expression, n, fill = 0) %>%
-  ungroup()
+expected_emotions <- c("Affiliation", "Disgust", "Dominance", "Enjoyment", "Neutral")
 
-uhr_data <- uhr_data %>%
-  rowwise() %>%
-  mutate(
-    row_sum = sum(c_across(where(is.numeric)), na.rm = TRUE),
-    UHR = ifelse(
-      row_sum > 0,
-      (get(as.character(expression_mapping[Expression_Type])) / row_sum) * 
-        (get(as.character(expression_mapping[Expression_Type])) / sum(get(as.character(expression_mapping[Expression_Type])), na.rm = TRUE)),
-      0
-    )
+uhr_results <- list()
+
+for (expressor in unique(filtered_data$Expressor_Short)) {
+  expressor_data <- filtered_data %>% filter(Expressor_Short == expressor)
+  
+  # 创建混淆矩阵
+  confusion_matrix <- expressor_data %>%
+    filter(Expression_Type %in% expected_emotions, Chosen_Expression %in% expected_emotions) %>%
+    count(Expression_Type, Chosen_Expression) %>%
+    spread(key = Chosen_Expression, value = n, fill = 0)
+  
+  # 补全缺失的行和列
+  confusion_matrix <- confusion_matrix %>%
+    complete(Expression_Type = expected_emotions, fill = list(n = 0))
+  
+  confusion_matrix <- confusion_matrix %>%
+    column_to_rownames(var = "Expression_Type")
+  
+  confusion_matrix <- confusion_matrix[expected_emotions, expected_emotions]
+  
+  N <- sum(confusion_matrix)
+  
+  uhr_values <- numeric(length(expected_emotions))
+  
+  for (i in seq_along(expected_emotions)) {
+    emotion <- expected_emotions[i]
+    a <- confusion_matrix[emotion, emotion]
+    b <- sum(confusion_matrix[emotion, ]) - a
+    d <- sum(confusion_matrix[, emotion]) - a
+    
+    if ((a + b) > 0 && (a + d) > 0 && N > 0) {
+      UHR <- (a / (a + b)) * (a / (a + d))
+    } else {
+      UHR <- NA
+    }
+    
+    uhr_values[i] <- UHR
+  }
+  
+  Average_UHR <- mean(uhr_values, na.rm = TRUE)
+  
+  uhr_results[[expressor]] <- data.frame(
+    Expressor_Short = expressor,
+    Gender = expressor_data$Gender[1],
+    Average_UHR = Average_UHR
   )
+}
 
-uhr_summary <- uhr_data %>%
-  group_by(Expressor_Short, Gender) %>%
-  summarise(Average_UHR = mean(UHR, na.rm = TRUE)) %>%
-  ungroup()
+uhr_summary <- bind_rows(uhr_results)
 
 # Step 6: 合并所有结果
 final_summary <- summary_data %>%
-  left_join(uhr_summary, by = c("Expressor_Short", "Gender"))
+  left_join(uhr_summary, by = c("Expressor_Short", "Gender")) %>%
+  mutate(
+    Expressor_Label = paste0(Expressor_Short, "_", Gender)
+  )
 
 # 将数据保存为Excel文件
 write_xlsx(final_summary, path = "final_summary.xlsx")
 
-
 # 描述性统计量计算 ----------------------------------------------------------------
 
-# 加载必要的库
-library(dplyr)
-
-# 读取Excel文件
-# 请确保您已经安装了readxl包：install.packages("readxl")
-library(readxl)
-data <- read_excel("final_summary.xlsx")
-
 # 计算描述性统计量
-descriptive_stats <- data %>%
+descriptive_stats <- final_summary %>%
   summarise(
     Hit_Rate_mean = mean(Hit_Rate, na.rm = TRUE),
     Hit_Rate_sd = sd(Hit_Rate, na.rm = TRUE),
@@ -159,22 +188,31 @@ write.csv(descriptive_stats, "Top_Expressors_descriptive_stats.csv", row.names =
 print(descriptive_stats)
 
 # 差异检验 --------------------------------------------------------------------
+
+# 检查并处理缺失值
+final_summary_clean <- final_summary %>%
+  drop_na(Hit_Rate, Avg_Arousal, Avg_Realism, Average_UHR)
+
 # 标准化数据
-data_scaled <- scale(final_summary[, c("Hit_Rate", "Avg_Arousal", "Avg_Realism", "Average_UHR")])
+data_scaled <- scale(final_summary_clean[, c("Hit_Rate", "Avg_Arousal", "Avg_Realism", "Average_UHR")])
 
 # 计算欧几里得距离矩阵
 dist_matrix <- as.matrix(dist(data_scaled))
 
-# 找到具有最大距离的`Expressor_Short`对
+# 设置行名和列名
+rownames(dist_matrix) <- final_summary_clean$Expressor_Label
+colnames(dist_matrix) <- final_summary_clean$Expressor_Label
+
+# 找到具有最大距离的`Expressor_Label`对
 max_dist <- max(dist_matrix)
 max_dist_indices <- which(dist_matrix == max_dist, arr.ind = TRUE)
 
-# 提取这些行列索引对应的Expressor_Short的实际名称
-expr_1 <- final_summary$Expressor_Short[max_dist_indices[1, 1]]
-expr_2 <- final_summary$Expressor_Short[max_dist_indices[1, 2]]
+# 提取这些行列索引对应的 Expressor_Label 的实际名称
+expr_1 <- rownames(dist_matrix)[max_dist_indices[1, 1]]
+expr_2 <- colnames(dist_matrix)[max_dist_indices[1, 2]]
 
-# 打印具有最大距离的`Expressor_Short`对
-cat("Expressor_Short pair with maximum distance:", as.character(expr_1), "and", as.character(expr_2), "\n")
+# 打印具有最大距离的 Expressor_Label 对
+cat("Expressor pair with maximum distance:", as.character(expr_1), "and", as.character(expr_2), "\n")
 
 # 保存最大距离结果
 max_dist_result <- data.frame(Expressor_1 = as.character(expr_1), Expressor_2 = as.character(expr_2), Distance = max_dist)
@@ -183,7 +221,7 @@ write.csv(max_dist_result, "Max_Distance_TopExpressors.csv", row.names = FALSE)
 # 创建注释数据框，用于在热图中显示性别信息
 annotation_df <- final_summary_clean %>%
   select(Expressor_Label, Gender) %>%
-  as.data.frame()  # 将 tibble 转换为 data frame
+  as.data.frame()
 
 rownames(annotation_df) <- annotation_df$Expressor_Label
 annotation_df$Expressor_Label <- NULL
@@ -218,18 +256,12 @@ pheatmap(dist_matrix,
          filename = "distance_matrix_heatmap_improved.png",
          width = 10,
          height = 10)
-# 加载必要的库
-install.packages("effsize")  # 安装用于计算效应量的包
-library(readxl)
-library(dplyr)
-library(effsize)
 
-# 读取数据
-data <- read_excel("final_summary.xlsx")
+# 检验不同性别Expressors的差异 -----------------------------------------------------
 
 # 分别提取男性和女性的数据
-male_data <- data %>% filter(Gender == "Male")
-female_data <- data %>% filter(Gender == "Female")
+male_data <- final_summary_clean %>% filter(Gender == "Male")
+female_data <- final_summary_clean %>% filter(Gender == "Female")
 
 # 定义需要检验的维度列表
 dimensions <- c("Hit_Rate", "Avg_Arousal", "Avg_Realism", "Average_UHR")
@@ -264,16 +296,3 @@ print(effect_sizes_df)
 # 保存结果为 CSV 文件
 write.csv(mann_whitney_df, "Mann_Whitney_U_Gender_FourDimensions.csv", row.names = TRUE)
 write.csv(effect_sizes_df, "Effect_Size_Cohens_d_Gender_FourDimensions.csv", row.names = FALSE)
-
-
-
-## Interpretation of Results:
-# - The Mann-Whitney U test results show the U-statistic and p-value for each dimension.
-#   A low p-value (typically < 0.05) indicates a statistically significant difference
-#   between male and female Expressors in that dimension.
-# - Cohen's d provides a measure of the effect size, which can be interpreted as follows:
-#   - 0.2: Small effect
-#   - 0.5: Medium effect
-#   - 0.8: Large effect
-#   A positive Cohen's d value suggests that males have higher scores on average,
-#   while a negative value indicates higher scores for females.
