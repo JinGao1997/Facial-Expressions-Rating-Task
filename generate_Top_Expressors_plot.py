@@ -112,6 +112,20 @@ summary_data = data.groupby(['Expressor_Short', 'Gender']).agg(
 # 合并所有结果
 final_summary = pd.merge(summary_data, uhr_summary, on=['Expressor_Short', 'Gender'])
 
+# **新增部分：按性别计算每个情绪下的 Arousal 得分的平均值、标准差和方差**
+arousal_stats = data_filtered.groupby(['Gender', 'Expression_Type']).agg(
+    Mean_Arousal=('Arousal_Score', 'mean'),
+    Std_Arousal=('Arousal_Score', 'std'),
+    Var_Arousal=('Arousal_Score', 'var')
+).reset_index()
+
+# 保存 Arousal 统计结果
+arousal_stats.to_csv("gender_emotion_arousal_stats.csv", index=False)
+
+# 打印 Arousal 统计结果
+print("Arousal Scores Statistics by Gender and Emotion:")
+print(arousal_stats)
+
 # 按性别计算平均数、标准差和方差
 gender_stats = final_summary.groupby('Gender').agg(
     Mean_Hit_Rate=('Hit_Rate', 'mean'),
