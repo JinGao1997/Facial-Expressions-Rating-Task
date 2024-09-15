@@ -1,4 +1,4 @@
-import pandas as pd
+import pandas as pd 
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
@@ -34,55 +34,99 @@ data['Expression_Type'] = data['Material'].apply(lambda x:
 data['Expressor'] = data['Material'].str.extract(r'(Fema\d+|Male\d+)')
 data['Gender'] = data['Expressor'].apply(lambda x: 'Female' if 'Fema' in x else 'Male')
 
-# 创建 Expressor_Short 列并确保其顺序与目标顺序一致
-data['Expressor_Short'] = pd.Categorical(data['Expressor'].str.replace('Fema', 'F').str.replace('Male', 'M'), 
-    categories=[x.replace('Fema', 'F').replace('Male', 'M') for x in (target_female_expressors + target_male_expressors)],
-    ordered=True
-)
+# 创建 Expressor_Short 列
+data['Expressor_Short'] = data['Expressor'].str.replace('Fema', 'F').str.replace('Male', 'M')
 
 # 过滤数据
 data = data[data['Expressor'].isin(target_female_expressors + target_male_expressors)]
 
-# 计算 Percentage Hit Rate 和 Realism 平均得分
+# 映射 Categorizing_Expressions_Score 到 Chosen_Expression
+score_to_expression = {1: 'Enjoyment', 2: 'Affiliation', 3: 'Dominance', 4: 'Disgust', 5: 'Neutral', 6: 'Other'}
+data['Chosen_Expression'] = data['Categorizing_Expressions_Score'].map(score_to_expression)
+
+# 排除 'Other' 类别
+data_filtered = data[(data['Expression_Type'] != 'Other') & (data['Chosen_Expression'] != 'Other')]
+
+# 定义预期的情绪类别
+expected_emotions = ['Affiliation', 'Disgust', 'Dominance', 'Enjoyment', 'Neutral']
+
+# 初始化存储结果的列表
+uhr_results = []
+
+# 逐个 Expressor 计算 UHR
+for expressor in data_filtered['Expressor_Short'].unique():
+    expressor_data = data_filtered[data_filtered['Expressor_Short'] == expressor]
+    
+    # 创建混淆矩阵
+    confusion_matrix = pd.crosstab(expressor_data['Expression_Type'], expressor_data['Chosen_Expression'], 
+                                   rownames=['Actual'], colnames=['Predicted'], dropna=False)
+    
+    # 确保混淆矩阵包含所有预期的情绪类别
+    confusion_matrix = confusion_matrix.reindex(index=expected_emotions, columns=expected_emotions, fill_value=0)
+    
+    N = confusion_matrix.values.sum()
+    
+    for emotion in expected_emotions:
+        a = confusion_matrix.at[emotion, emotion]  # 正确预测次数
+        b = confusion_matrix.loc[emotion].sum() - a  # 漏报（假阴性）
+        d = confusion_matrix[emotion].sum() - a  # 误报（假阳性）
+        
+        # 计算 UHR
+        if (a + b) > 0 and (a + d) > 0:
+            UHR = (a / (a + b)) * (a / (a + d))
+            Pc = ((a + b) / N) * ((a + d) / N)
+            Performance_Above_Chance = UHR - Pc
+        else:
+            UHR = np.nan
+            Pc = np.nan
+            Performance_Above_Chance = np.nan
+        
+        uhr_results.append({'Expressor_Short': expressor, 'Gender': expressor_data['Gender'].iloc[0],
+                            'Expression_Type': emotion, 'UHR': UHR, 'Chance_UHR': Pc,
+                            'Performance_Above_Chance': Performance_Above_Chance})
+
+# 将结果转换为 DataFrame
+uhr_df = pd.DataFrame(uhr_results)
+
+# 计算每个 Expressor 的平均 UHR
+uhr_summary = uhr_df.groupby(['Expressor_Short', 'Gender']).agg(Average_UHR=('UHR', 'mean')).reset_index()
+
+# 计算 Hit Rate 和 Avg_Realism
 expression_mapping = {'Enjoyment': 1, 'Affiliation': 2, 'Dominance': 3, 'Disgust': 4, 'Neutral': 5}
 
-data['Correct'] = np.where(data['Categorizing_Expressions_Score'] == 6, np.nan, 
-                           np.where(data['Categorizing_Expressions_Score'] == data['Expression_Type'].map(expression_mapping), 1, 0))
+data['Correct'] = np.where(
+    data['Categorizing_Expressions_Score'] == 6, 
+    np.nan, 
+    np.where(
+        data['Categorizing_Expressions_Score'] == data['Expression_Type'].map(expression_mapping), 
+        1, 
+        0
+    )
+)
 
 summary_data = data.groupby(['Expressor_Short', 'Gender']).agg(
     Hit_Rate=('Correct', 'mean'),
     Avg_Realism=('Realism_Score', 'mean')
 ).reset_index()
 
-# 计算 UHR (Unbiased Hit Rate)
-uhr_data = data.pivot_table(index=['Expressor_Short', 'Gender', 'Expression_Type'], 
-                            columns='Categorizing_Expressions_Score', 
-                            values='Material', 
-                            aggfunc='count', 
-                            fill_value=0).reset_index()
-
-uhr_data['row_sum'] = uhr_data.iloc[:, 3:].sum(axis=1)
-
-def calc_uhr(row):
-    score_col = expression_mapping.get(row['Expression_Type'], np.nan)
-    if pd.notna(score_col):
-        correct_preds = row[score_col]
-        if correct_preds > 0:
-            return (correct_preds / row['row_sum']) * (correct_preds / row['row_sum'])
-        return 0
-    return 0
-
-uhr_data['UHR'] = uhr_data.apply(calc_uhr, axis=1)
-uhr_summary = uhr_data.groupby(['Expressor_Short', 'Gender']).agg(Average_UHR=('UHR', 'mean')).reset_index()
-
 # 合并所有结果
 final_summary = pd.merge(summary_data, uhr_summary, on=['Expressor_Short', 'Gender'])
 
-# 检查 final_summary 内容
-print("Final Summary Head:")
-print(final_summary.head())
+# 按性别计算平均数、标准差和方差
+gender_stats = final_summary.groupby('Gender').agg(
+    Mean_Hit_Rate=('Hit_Rate', 'mean'),
+    Std_Hit_Rate=('Hit_Rate', 'std'),
+    Var_Hit_Rate=('Hit_Rate', 'var'),
+    Mean_Realism=('Avg_Realism', 'mean'),
+    Std_Realism=('Avg_Realism', 'std'),
+    Var_Realism=('Avg_Realism', 'var'),
+    Mean_UHR=('Average_UHR', 'mean'),
+    Std_UHR=('Average_UHR', 'std'),
+    Var_UHR=('Average_UHR', 'var')
+).reset_index()
 
-# 保存处理后的数据以供可视化使用
+# 保存结果
+gender_stats.to_csv("gender_summary_stats.csv", index=False)
 final_summary.to_csv("final_summary_data.csv", index=False)
 
 # 可视化部分（按三行一列排列，并调整图例位置）
