@@ -218,7 +218,7 @@ cat("Expressor pair with maximum distance:", as.character(expr_1), "and", as.cha
 max_dist_result <- data.frame(Expressor_1 = as.character(expr_1), Expressor_2 = as.character(expr_2), Distance = max_dist)
 write.csv(max_dist_result, "Max_Distance_TopExpressors.csv", row.names = FALSE)
 
-# 创建注释数据框，用于在热图中显示性别信息
+# Create annotation dataframe for gender information
 annotation_df <- final_summary_clean %>%
   select(Expressor_Label, Gender) %>%
   as.data.frame()
@@ -226,19 +226,19 @@ annotation_df <- final_summary_clean %>%
 rownames(annotation_df) <- annotation_df$Expressor_Label
 annotation_df$Expressor_Label <- NULL
 
-# 确认行名匹配
+# Ensure row names match
 if (!all(rownames(annotation_df) == rownames(dist_matrix))) {
   stop("Row names of annotation_df and dist_matrix do not match.")
 }
 
-# 设置颜色方案
+# Set color scheme for the heatmap
 heatmap_colors <- colorRampPalette(rev(brewer.pal(n = 11, name = "RdBu")))(100)
 
-# 设置性别的颜色映射
-gender_colors <- c(Female = "#E41A1C", Male = "#377EB8")
+# Use distinct colors for gender annotations
+gender_colors <- c(Female = "#984EA3", Male = "#4DAF4A")  # Purple and Green
 annotation_colors <- list(Gender = gender_colors)
 
-# 使用 pheatmap 绘制热图
+# Draw the heatmap
 pheatmap(dist_matrix,
          color = heatmap_colors,
          cluster_rows = TRUE,
