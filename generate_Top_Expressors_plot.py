@@ -136,7 +136,7 @@ def plot_combined_data(df):
     
     # 绘制 Percentage Hit Rate
     sns.barplot(x='Expressor_Short', y='Hit_Rate', hue='Gender', data=df, ax=axes[0], palette="Blues_d")
-    axes[0].set_title("Percentage Hit Rate", fontsize=18)
+    axes[0].set_title("Percentage Hit Rate Score", fontsize=18)
     axes[0].set_xlabel("Expressor", fontsize=14)
     axes[0].set_ylabel("Percentage Hit Rate", fontsize=14)
     axes[0].tick_params(axis='x', rotation=90, labelsize=12)
@@ -145,7 +145,7 @@ def plot_combined_data(df):
 
     # 绘制 UHR
     sns.barplot(x='Expressor_Short', y='Average_UHR', hue='Gender', data=df, ax=axes[1], palette="Oranges_d")
-    axes[1].set_title("Average UHR", fontsize=18)
+    axes[1].set_title("Unbiased Hit Rate Score", fontsize=18)
     axes[1].set_xlabel("Expressor", fontsize=14)
     axes[1].set_ylabel("Average UHR", fontsize=14)
     axes[1].tick_params(axis='x', rotation=90, labelsize=12)
@@ -154,7 +154,7 @@ def plot_combined_data(df):
 
     # 绘制 Average Realism
     sns.barplot(x='Expressor_Short', y='Avg_Realism', hue='Gender', data=df, ax=axes[2], palette="Greens_d")
-    axes[2].set_title("Average Realism Score", fontsize=18)
+    axes[2].set_title("Plausibility Score", fontsize=18)
     axes[2].set_xlabel("Expressor", fontsize=14)
     axes[2].set_ylabel("Average Realism Score", fontsize=14)
     axes[2].tick_params(axis='x', rotation=90, labelsize=12)
