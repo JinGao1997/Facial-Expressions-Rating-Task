@@ -180,42 +180,65 @@ cat("Expressor_Short pair with maximum distance:", as.character(expr_1), "and", 
 max_dist_result <- data.frame(Expressor_1 = as.character(expr_1), Expressor_2 = as.character(expr_2), Distance = max_dist)
 write.csv(max_dist_result, "Max_Distance_TopExpressors.csv", row.names = FALSE)
 
-# 增大画布尺寸以容纳更多的核心热图内容，同时调整标签和字体
-png("distance_matrix_heatmap.png", width = 3000, height = 3000, res = 300)
-heatmap(dist_matrix, 
-        Rowv = NA, Colv = NA, 
-        labRow = final_summary$Expressor_Short,  
-        labCol = final_summary$Expressor_Short,  
-        col = colorRampPalette(c("blue", "white", "red"))(100),  
-        main = "Distance Matrix for Top Expressors", 
-        xlab = "Expressor", ylab = "Expressor",
-        margins = c(4, 4),
-        cexRow = 1, cexCol = 1)
-dev.off()
+# 创建注释数据框，用于在热图中显示性别信息
+annotation_df <- final_summary_clean %>%
+  select(Expressor_Label, Gender) %>%
+  as.data.frame()  # 将 tibble 转换为 data frame
 
-# 检验不同性别Expressors的差异 -----------------------------------------------------
+rownames(annotation_df) <- annotation_df$Expressor_Label
+annotation_df$Expressor_Label <- NULL
 
+# 确认行名匹配
+if (!all(rownames(annotation_df) == rownames(dist_matrix))) {
+  stop("Row names of annotation_df and dist_matrix do not match.")
+}
+
+# 设置颜色方案
+heatmap_colors <- colorRampPalette(rev(brewer.pal(n = 11, name = "RdBu")))(100)
+
+# 设置性别的颜色映射
+gender_colors <- c(Female = "#E41A1C", Male = "#377EB8")
+annotation_colors <- list(Gender = gender_colors)
+
+# 使用 pheatmap 绘制热图
+pheatmap(dist_matrix,
+         color = heatmap_colors,
+         cluster_rows = TRUE,
+         cluster_cols = TRUE,
+         annotation_row = annotation_df,
+         annotation_col = annotation_df,
+         annotation_colors = annotation_colors,
+         show_rownames = TRUE,
+         show_colnames = TRUE,
+         fontsize_row = 6,
+         fontsize_col = 6,
+         legend = TRUE,
+         main = "Distance Matrix for Top Expressors",
+         fontsize = 10,
+         filename = "distance_matrix_heatmap_improved.png",
+         width = 10,
+         height = 10)
 # 加载必要的库
-install.packages("effsize")
+install.packages("effsize")  # 安装用于计算效应量的包
 library(readxl)
 library(dplyr)
 library(effsize)
 
-# 读取Excel文件
+# 读取数据
 data <- read_excel("final_summary.xlsx")
 
 # 分别提取男性和女性的数据
 male_data <- data %>% filter(Gender == "Male")
 female_data <- data %>% filter(Gender == "Female")
 
-# 定义维度列表
+# 定义需要检验的维度列表
 dimensions <- c("Hit_Rate", "Avg_Arousal", "Avg_Realism", "Average_UHR")
 
 # 初始化结果列表
 mann_whitney_results <- list()
 effect_sizes <- list()
 
-# 进行 Mann-Whitney U 检验和计算 Cohen's d
+# 对每个维度进行检验
 for (dim in dimensions) {
   # Mann-Whitney U 检验
   test_result <- wilcox.test(male_data[[dim]], female_data[[dim]], exact = FALSE)
@@ -226,22 +249,23 @@ for (dim in dimensions) {
   effect_sizes[[dim]] <- d_value
 }
 
-# 转换结果为数据框
+# 将结果转换为数据框
 mann_whitney_df <- do.call(rbind, mann_whitney_results) %>% as.data.frame()
 effect_sizes_df <- data.frame(Dimension = names(effect_sizes), `Cohen's d` = unlist(effect_sizes))
 
-# 查看结果
+# 打印结果
 print("Mann-Whitney U Test Results:")
-options(scipen = 999)  # 这会减少使用科学计数法的倾向
+options(scipen = 999)  # 避免科学计数法显示
 print(mann_whitney_df)
-
 
 print("Effect Size (Cohen's d) Results:")
 print(effect_sizes_df)
 
-# 保存结果为CSV文件
+# 保存结果为 CSV 文件
 write.csv(mann_whitney_df, "Mann_Whitney_U_Gender_FourDimensions.csv", row.names = TRUE)
 write.csv(effect_sizes_df, "Effect_Size_Cohens_d_Gender_FourDimensions.csv", row.names = FALSE)
+
+
 
 ## Interpretation of Results:
 # - The Mann-Whitney U test results show the U-statistic and p-value for each dimension.
