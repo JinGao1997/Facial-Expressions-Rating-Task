@@ -238,24 +238,30 @@ heatmap_colors <- colorRampPalette(rev(brewer.pal(n = 11, name = "RdBu")))(100)
 gender_colors <- c(Female = "#984EA3", Male = "#4DAF4A")  # Purple and Green
 annotation_colors <- list(Gender = gender_colors)
 
-# Draw the heatmap
 pheatmap(dist_matrix,
          color = heatmap_colors,
          cluster_rows = TRUE,
          cluster_cols = TRUE,
-         annotation_row = annotation_df,
-         annotation_col = annotation_df,
+         annotation_row = annotation_df,  # 保留行上的性别注释
+         annotation_col = annotation_df,  # 保留列上的性别注释
          annotation_colors = annotation_colors,
          show_rownames = TRUE,
          show_colnames = TRUE,
+         labels_row = final_summary_clean$Expressor_Short,  # 使用简化后的名称
+         labels_col = final_summary_clean$Expressor_Short,  # 使用简化后的名称
          fontsize_row = 6,
          fontsize_col = 6,
          legend = TRUE,
+         annotation_names_row = FALSE,  # 去掉行注释的名称 "Gender"
+         annotation_names_col = FALSE,  # 去掉列注释的名称 "Gender"
          main = "Distance Matrix for Top Expressors",
          fontsize = 10,
          filename = "distance_matrix_heatmap_improved.png",
          width = 10,
          height = 10)
+
+
+
 
 # 检验不同性别Expressors的差异 -----------------------------------------------------
 
