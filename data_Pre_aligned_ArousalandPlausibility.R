@@ -1,4 +1,4 @@
-# 安装所需的库
+# 安装所需的库 / Install required packages
 install.packages("ggplot2")
 install.packages("dplyr")
 install.packages("ggpubr")
@@ -6,7 +6,7 @@ install.packages("readxl")
 install.packages("RColorBrewer")
 install.packages("FSA")
 
-
+# 加载必要的库 / Load necessary libraries
 library(ggplot2)
 library(dplyr)
 library(ggpubr)
@@ -14,11 +14,11 @@ library(readxl)
 library(RColorBrewer)
 library(FSA)
 
-# 读取 Excel 数据
-# 请替换为你数据的实际路径
+# 读取 Excel 数据 / Read Excel data
+# 请替换为你数据的实际路径 / Please replace with the actual path to your data
 data <- read_excel("N:/JinLab/Personal_JG_Lab/R_course/Facial Expressions Rating Task/aligned_data.xlsx")
 
-# 从 Material 列中提取表情类型
+# 从 Material 列中提取表情类型 / Extract expression types from the 'Material' column
 data <- data %>%
   mutate(Expression_Type = case_when(
     grepl("dis", Material) ~ "Disgust",
@@ -29,7 +29,7 @@ data <- data %>%
     TRUE ~ "Other"
   ))
 
-# 计算每个图片的平均 Arousal 和 Realism 评分
+# 计算每个图片的平均 Arousal 和 Realism 评分 / Calculate the mean Arousal and Realism scores for each image
 mean_scores <- data %>%
   group_by(Material, Expression_Type) %>%
   summarise(
@@ -37,21 +37,21 @@ mean_scores <- data %>%
     Realism_Score = mean(Realism_Score, na.rm = TRUE)
   )
 
-# Kruskal-Wallis 检验
+# Kruskal-Wallis 检验 / Kruskal-Wallis test
 kruskal_arousal <- kruskal.test(Arousal_Score ~ Expression_Type, data = mean_scores)
 kruskal_realism <- kruskal.test(Realism_Score ~ Expression_Type, data = mean_scores)
 
-# Dunn's test 事后检验
+# Dunn's test 事后检验 / Dunn's test for post-hoc analysis
 dunn_arousal <- dunnTest(Arousal_Score ~ Expression_Type, data = mean_scores, method = "bonferroni")
 dunn_realism <- dunnTest(Realism_Score ~ Expression_Type, data = mean_scores, method = "bonferroni")
 
-# Realism 评分的单样本 t 检验，检验均值是否与中点值 4 显著不同
+# Realism 评分的单样本 t 检验，检验均值是否与中点值 4 显著不同 / One-sample t-test to check if the mean Realism Score significantly differs from the midpoint value 4
 t_test_realism <- t.test(mean_scores$Realism_Score, mu = 4)
 
-# 创建一个文件来保存结果
+# 创建一个文件来保存结果 / Create a file to save the results
 report_file <- "Analysis_ArousalandPlauisibility.txt"
 
-# 写入分析结果到文件
+# 写入分析结果到文件 / Write analysis results to the file
 sink(report_file)
 cat("Kruskal-Wallis Test Results:\n")
 cat("Arousal Scores:\n")
@@ -59,18 +59,18 @@ print(kruskal_arousal)
 cat("\nRealism Scores:\n")
 print(kruskal_realism)
 
-# 写入 Dunn's test 事后检验结果
+# 写入 Dunn's test 事后检验结果 / Write Dunn's test post-hoc results
 cat("\nDunn's Test Post-Hoc Results (with Bonferroni correction):\n")
 cat("\nArousal Scores:\n")
 print(dunn_arousal)
 cat("\nRealism Scores:\n")
 print(dunn_realism)
 
-# 写入单样本 t 检验结果
+# 写入单样本 t 检验结果 / Write one-sample t-test results
 cat("\nOne-Sample t-Test for Realism Scores:\n")
 print(t_test_realism)
 
-# 写入分析报告
+# 写入分析报告 / Write analysis report
 cat("\nAnalysis Report:\n")
 cat("\n1. Arousal Scores by Expression Type:\n")
 cat("The Kruskal-Wallis test indicates that there are significant differences in Arousal Scores across different expression types.\n")
@@ -100,22 +100,20 @@ cat("Dunn's test further clarifies the specific differences between expression t
 cat("Additionally, the one-sample t-test shows whether the average Realism Scores deviate significantly from the midpoint of the scale.\n")
 sink()
 
-# 提示结果已经保存
+# 提示结果已经保存 / Notify that the analysis report has been saved
 cat("Analysis Report, including post-hoc tests and one-sample t-test, has been saved to", report_file, "\n")
 
-
-
-# 对结果进行可视化 ----------------------------------------------------------------
-# 使用更优雅的配色方案
+# 对结果进行可视化 / Visualization of the results
+# 使用更优雅的配色方案 / Use a more elegant color palette
 palette <- brewer.pal(n = 5, name = "Set1")
 
-# 小提琴图 - Arousal Score
+# 小提琴图 - Arousal Score / Violin plot - Arousal Score
 p1 <- ggplot(mean_scores, aes(x = Expression_Type, y = Arousal_Score, fill = Expression_Type)) +
-  geom_violin(trim = TRUE, color = "black", size = 1, alpha = 0.7) +  # 调整线条粗细和透明度
+  geom_violin(trim = TRUE, color = "black", size = 1, alpha = 0.7) +  # 调整线条粗细和透明度 / Adjust line thickness and transparency
   geom_boxplot(width = 0.1, position = position_dodge(0.9), color = "black", alpha = 0.9) +
   scale_fill_manual(values = palette) +
   labs(title = "Arousal Scores by Expression Type", x = "Expression Type", y = "Arousal Score") +
-  theme_classic(base_size = 14) +  # 使用经典主题
+  theme_classic(base_size = 14) +  # 使用经典主题 / Use classic theme
   theme(
     legend.position = "none",
     plot.title = element_text(hjust = 0.5, face = "bold"),
@@ -123,13 +121,13 @@ p1 <- ggplot(mean_scores, aes(x = Expression_Type, y = Arousal_Score, fill = Exp
     axis.title = element_text(size = 14, face = "bold")
   )
 
-# 小提琴图 - Realism Score
+# 小提琴图 - Realism Score / Violin plot - Realism Score
 p2 <- ggplot(mean_scores, aes(x = Expression_Type, y = Realism_Score, fill = Expression_Type)) +
-  geom_violin(trim = TRUE, color = "black", size = 1, alpha = 0.7) +  # 调整线条粗细和透明度
+  geom_violin(trim = TRUE, color = "black", size = 1, alpha = 0.7) +  # 调整线条粗细和透明度 / Adjust line thickness and transparency
   geom_boxplot(width = 0.1, position = position_dodge(0.9), color = "black", alpha = 0.9) +
   scale_fill_manual(values = palette) +
   labs(title = "Realism Scores by Expression Type", x = "Expression Type", y = "Realism Score") +
-  theme_classic(base_size = 14) +  # 使用经典主题
+  theme_classic(base_size = 14) +  # 使用经典主题 / Use classic theme
   theme(
     legend.position = "none",
     plot.title = element_text(hjust = 0.5, face = "bold"),
@@ -137,5 +135,5 @@ p2 <- ggplot(mean_scores, aes(x = Expression_Type, y = Realism_Score, fill = Exp
     axis.title = element_text(size = 14, face = "bold")
   )
 
-# 将两个图组合显示
+# 将两个图组合显示 / Arrange the two plots side by side
 ggarrange(p1, p2, ncol = 2, nrow = 1)
