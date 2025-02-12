@@ -109,7 +109,7 @@ calculate_uhr_chance_uhr <- function(conf_matrix) {
     b <- sum(conf_matrix[emotion, ], na.rm = TRUE) - a
     d <- sum(conf_matrix[, emotion], na.rm = TRUE) - a
     
-    # 如果有 NA，则直接设为 0
+    # 如果有 NA，则直接设为 0；否则，如果 (a+b) 和 (a+d) > 0 且 N > 0，则计算 UHR
     if (is.na(a) || is.na(b) || is.na(d) || is.na(N)) {
       UHR <- 0
       Pc <- 0
@@ -173,8 +173,7 @@ for (case in cases) {
         choice_matrix[is.na(choice_matrix)] <- 0
       }
       
-      # 将 choice_matrix 转换为 data.frame（避免 tibble 设置行名时的警告），
-      # 设置行名后移除 Expression_Type 列，再转换为矩阵
+      # 将 choice_matrix 转换为 data.frame，设置行名后去除 Expression_Type 列，再转换为矩阵
       choice_matrix <- as.data.frame(choice_matrix)
       rownames(choice_matrix) <- choice_matrix$Expression_Type
       choice_matrix <- choice_matrix[, -1]
@@ -220,7 +219,8 @@ results <- results %>%
   mutate(
     Face_Gender = factor(Face_Gender),
     Rater_Gender = factor(Rater_Gender),
-    Expression_Type = factor(Expression_Type, levels = expected_emotions),
+    # 设置 Expression_Type 的因子水平，并将参考水平设为 "Neutral"
+    Expression_Type = factor(Expression_Type, levels = c("Neutral", "Affiliation", "Disgust", "Dominance", "Enjoyment")),
     Version = factor(Version),
     Group = factor(Group)
   )
@@ -284,7 +284,7 @@ ggplot(mean_uhr, aes(x = Expression_Type, y = Mean_UHR)) +
 write.xlsx(results, "uhr_results_all_cases.xlsx", rowNames = FALSE)
 cat("最终结果已保存为 uhr_results_all_cases.xlsx。\n")
 
-######################################################################################
+#################################################################
 library(dplyr)
 
 # 定义预期的表情水平
