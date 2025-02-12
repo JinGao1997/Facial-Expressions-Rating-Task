@@ -1,18 +1,41 @@
-# 加载必要的R包 / Load necessary packages
+# ---------------------------------------------------------------------------
+# 加载必要的 R 包
 library(dplyr)
 library(tidyr)
 library(readxl)
 library(openxlsx)
-library(car)  # 用于ANOVA / Used for ANOVA
-library(emmeans)  # 用于事后检验 / Used for post-hoc tests
-library(ggplot2)  # 可视化 / Visualization
-library(ggpubr)   # Q-Q 图 / Q-Q plot
+library(car)         # 可选，用于其他分析
+library(emmeans)     # 用于事后检验
+library(ggplot2)     # 用于可视化
+library(ggpubr)      # 用于 Q-Q 图等
+library(lmerTest)    # 用于混合效应模型分析
+library(stringr)     # 用于字符串处理
 
+# ---------------------------------------------------------------------------
 # Step 1: 读取数据 / Read data
-file_path <- "aligned_data.xlsx"
+file_path <- "N:/JinLab/Personal_JG_Lab/R_course/Facial Expressions Rating Task/aligned_data.xlsx"
 data <- read_excel(file_path)
 
-# Step 2: 从 Material 列中提取表情类型 / Extract expression type from the Material column
+# ---------------------------------------------------------------------------
+# Step 1.1: 转换评分者性别 / Convert Rater_Gender from raw Gender column
+# 注意：原始数据中 Gender 列的 1 表示女性，2 表示男性
+data <- data %>%
+  mutate(Rater_Gender = case_when(
+    Gender == 1 ~ "Female",
+    Gender == 2 ~ "Male",
+    TRUE ~ NA_character_
+  ))
+
+# ---------------------------------------------------------------------------
+# 【调试提示】（可选）检查 Material 字段中是否包含 "male" 和 "fema"
+# debug_materials <- data %>%
+#   mutate(has_male = grepl("male", Material, ignore.case = TRUE),
+#          has_fema = grepl("fema", Material, ignore.case = TRUE)) %>%
+#   select(Material, has_male, has_fema)
+# print(head(debug_materials, 20))
+
+# ---------------------------------------------------------------------------
+# Step 2: 从 Material 提取表情类别 / Extract Expression_Type from Material
 data <- data %>%
   mutate(Expression_Type = case_when(
     grepl("dis", Material, ignore.case = TRUE) ~ "Disgust",
@@ -23,7 +46,8 @@ data <- data %>%
     TRUE ~ "Other"
   ))
 
-# Step 3: 将 Categorizing_Expressions_Score 映射为 Chosen_Expression / Map Categorizing_Expressions_Score to Chosen_Expression
+# ---------------------------------------------------------------------------
+# Step 3: 将 Categorizing_Expressions_Score 映射为 Chosen_Expression
 data <- data %>%
   mutate(Chosen_Expression = case_when(
     Categorizing_Expressions_Score == 1 ~ "Enjoyment", 
@@ -35,30 +59,61 @@ data <- data %>%
     TRUE ~ NA_character_
   ))
 
-# 初始化存储结果的数据框 / Initialize a dataframe to store results
+# ---------------------------------------------------------------------------
+# Step 3.1: 从 Material 提取其他变量
+# Face_Gender：先匹配 "fema"（例如 R_enjFema18），再匹配 "male"（例如 L_domMale89 或 L_affMale41）
+# Version：根据 Material 中是否包含 "L" 或 "R"
+# 注意：Group 直接使用原始数据中的 Group 变量（表示被试被分配到的实验设计组）
+data <- data %>%
+  mutate(
+    Face_Gender = case_when(
+      grepl("fema", Material, ignore.case = TRUE) ~ "Female",  
+      grepl("male", Material, ignore.case = TRUE) ~ "Male",
+      TRUE ~ NA_character_
+    ),
+    Version = case_when(
+      grepl("L", Material, ignore.case = TRUE) ~ "L",
+      grepl("R", Material, ignore.case = TRUE) ~ "R",
+      TRUE ~ NA_character_
+    )
+    # Group 直接沿用原始数据中的 Group 变量
+  )
+
+# ---------------------------------------------------------------------------
+# Step 4: 初始化存储结果的数据框 / Initialize a dataframe to store results
+# 这里我们按 CASE、Expression_Type 以及 Face_Gender 分组保存计算结果
 results <- data.frame(
   CASE = integer(),
   Expression_Type = character(),
+  Face_Gender = character(),
   UHR = numeric(),
   Chance_UHR = numeric(),
   Performance_Above_Chance = numeric(),
+  Rater_Gender = character(),
+  Version = character(),
+  Group = character(),  # 使用原始数据中的 Group 信息
   stringsAsFactors = FALSE
 )
 
-# Step 4: 定义 UHR 和 Chance UHR 计算函数 / Define UHR and Chance UHR calculation function
+# ---------------------------------------------------------------------------
+# Step 5: 定义 UHR 和 Chance UHR 的计算函数
 calculate_uhr_chance_uhr <- function(conf_matrix) {
-  uhr_results <- numeric(length(rownames(conf_matrix)))
-  chance_uhr_results <- numeric(length(rownames(conf_matrix)))
-  N <- sum(conf_matrix)  # 总和 N / Total sum N
+  uhr_results <- numeric(nrow(conf_matrix))
+  chance_uhr_results <- numeric(nrow(conf_matrix))
+  # 总计数 N 忽略 NA
+  N <- sum(conf_matrix, na.rm = TRUE)
   
-  for (i in seq_along(rownames(conf_matrix))) {
+  for (i in seq_len(nrow(conf_matrix))) {
     emotion <- rownames(conf_matrix)[i]
-    a <- conf_matrix[emotion, emotion]  # 对角线元素 / Diagonal element
-    b <- sum(conf_matrix[emotion, ]) - a  # 行中的非对角线元素之和 / Row sum excluding diagonal
-    d <- sum(conf_matrix[, emotion]) - a  # 列中的非对角线元素之和 / Column sum excluding diagonal
+    a <- conf_matrix[emotion, emotion]
+    b <- sum(conf_matrix[emotion, ], na.rm = TRUE) - a
+    d <- sum(conf_matrix[, emotion], na.rm = TRUE) - a
     
-    # 检查 b 和 d 是否为0，避免除以零 / Check if b and d are 0 to avoid division by zero
-    if ((a + b) > 0 & (a + d) > 0 & N > 0) {
+    # 如果有 NA，则直接设为 0
+    if (is.na(a) || is.na(b) || is.na(d) || is.na(N)) {
+      UHR <- 0
+      Pc <- 0
+    } else if ((a + b) > 0 && (a + d) > 0 && N > 0) {
       UHR <- (a / (a + b)) * (a / (a + d))
       Pc <- ((a + b) / N) * ((a + d) / N)
     } else {
@@ -73,63 +128,104 @@ calculate_uhr_chance_uhr <- function(conf_matrix) {
   return(list(UHR = uhr_results, Chance_UHR = chance_uhr_results))
 }
 
-# 初始化存储不完整数据的CASE列表 / Initialize a list for incomplete cases
+# ---------------------------------------------------------------------------
+# 初始化存储不完整数据的 CASE 列表（调试用）
 incomplete_cases <- list()
 
-# Step 5: 按 CASE 计算 UHR 和 Chance UHR / Calculate UHR and Chance UHR by CASE
-cases <- unique(data$CASE)
+# ---------------------------------------------------------------------------
+# Step 6: 按 CASE, Expression_Type 以及 Face_Gender 计算 UHR 和 Chance UHR
+# 定义预期的表情水平
 expected_emotions <- c("Affiliation", "Disgust", "Dominance", "Enjoyment", "Neutral")
 
+cases <- unique(data$CASE)
+
 for (case in cases) {
-  # 筛选出当前CASE的数据 / Filter data for the current CASE
+  # 筛选当前 CASE 的数据
   case_data <- data %>% filter(CASE == case)
   
-  # 创建选择矩阵，排除 "Other" 类别 / Create choice matrix, excluding "Other" category
-  choice_matrix <- case_data %>%
-    filter(Expression_Type != "Other", Chosen_Expression != "Other") %>%
-    count(Expression_Type, Chosen_Expression) %>%
-    spread(key = Chosen_Expression, value = n, fill = 0) %>%
-    complete(Expression_Type = expected_emotions, fill = list(n = 0))
+  # 获取当前 CASE 中存在的所有 Face_Gender
+  face_genders <- unique(case_data$Face_Gender)
   
-  # 转换为普通数据框以支持行名 / Convert to a regular dataframe to support rownames
-  choice_matrix <- as.data.frame(choice_matrix)
-  
-  # 检查是否包含所有预期的表情类别 / Check if all expected emotions are included
-  missing_emotions <- setdiff(expected_emotions, colnames(choice_matrix))
-  
-  if (length(missing_emotions) > 0) {
-    incomplete_cases[[length(incomplete_cases) + 1]] <- list(CASE = case, Missing_Emotions = missing_emotions)
-    cat("Warning: Missing emotions in CASE", case, "- Missing:", missing_emotions, "\n")
-    next
-  }
-  
-  # 正常进行 UHR 和 Chance UHR 计算 / Proceed with UHR and Chance UHR calculation
-  rownames(choice_matrix) <- choice_matrix$Expression_Type
-  choice_matrix <- choice_matrix[, -1]
-  choice_matrix <- as.matrix(choice_matrix)
-
-  # 计算 UHR 和 Chance UHR / Calculate UHR and Chance UHR
-  uhr_chance_results <- calculate_uhr_chance_uhr(conf_matrix = choice_matrix)
-  
-  for (i in seq_along(expected_emotions)) {
-    results <- rbind(results, data.frame(
-      CASE = case,
-      Expression_Type = expected_emotions[i],
-      UHR = uhr_chance_results$UHR[i],
-      Chance_UHR = uhr_chance_results$Chance_UHR[i],
-      Performance_Above_Chance = uhr_chance_results$UHR[i] - uhr_chance_results$Chance_UHR[i]
-    ))
+  # 对每个 Face_Gender 分别处理
+  for (fg in face_genders) {
+    fg_data <- case_data %>% filter(Face_Gender == fg)
+    
+    for (em in expected_emotions) {
+      # 筛选该组中 Expression_Type 为 em 的记录，且 Chosen_Expression 不为 "Other"
+      subset_data <- fg_data %>% filter(Expression_Type == em,
+                                        Chosen_Expression != "Other",
+                                        Expression_Type != "Other")
+      if(nrow(subset_data) == 0) next
+      
+      # 构造混淆矩阵：统计 Expression_Type 与 Chosen_Expression 的频数
+      # 明确指定因子水平，缺失的部分补 0
+      choice_matrix <- subset_data %>%
+        count(Expression_Type, Chosen_Expression) %>%
+        complete(
+          Expression_Type = factor(expected_emotions, levels = expected_emotions),
+          Chosen_Expression = factor(expected_emotions, levels = expected_emotions),
+          fill = list(n = 0)
+        ) %>%
+        spread(key = Chosen_Expression, value = n, fill = 0)
+      
+      # 保险起见，将矩阵中所有 NA 替换为 0
+      if(any(is.na(choice_matrix))) {
+        choice_matrix[is.na(choice_matrix)] <- 0
+      }
+      
+      # 将 choice_matrix 转换为 data.frame（避免 tibble 设置行名时的警告），
+      # 设置行名后移除 Expression_Type 列，再转换为矩阵
+      choice_matrix <- as.data.frame(choice_matrix)
+      rownames(choice_matrix) <- choice_matrix$Expression_Type
+      choice_matrix <- choice_matrix[, -1]
+      choice_matrix <- as.matrix(choice_matrix)
+      
+      # 计算 UHR 和 Chance UHR
+      uhr_chance_results <- calculate_uhr_chance_uhr(conf_matrix = choice_matrix)
+      
+      # 取该子集中的第一个记录作为其他变量的代表
+      Rater_Gender_val <- subset_data$Rater_Gender[1]
+      Version_val <- subset_data$Version[1]
+      Group_val <- as.character(subset_data$Group[1])  # 使用原始数据中的 Group
+      
+      # 保存结果
+      results <- rbind(results, data.frame(
+        CASE = case,
+        Expression_Type = em,
+        Face_Gender = fg,
+        UHR = uhr_chance_results$UHR[which(expected_emotions == em)],
+        Chance_UHR = uhr_chance_results$Chance_UHR[which(expected_emotions == em)],
+        Performance_Above_Chance = uhr_chance_results$UHR[which(expected_emotions == em)] - 
+          uhr_chance_results$Chance_UHR[which(expected_emotions == em)],
+        Rater_Gender = Rater_Gender_val,
+        Version = Version_val,
+        Group = Group_val,
+        stringsAsFactors = FALSE
+      ))
+    }
   }
 }
 
-# 打印结果 / Print results
+# 调试用：打印部分结果，并查看 Face_Gender 水平
 print(results)
+cat("Face_Gender levels in results:", levels(factor(results$Face_Gender)), "\n")
 
-# Step 6: Arcsine transformation of UHR
+# ---------------------------------------------------------------------------
+# Step 7: 对 UHR 进行 Arcsine 转换
 results <- results %>%
   mutate(Arcsine_UHR = asin(sqrt(UHR)))
 
-# Step 7: 计算不同 Expression_Type 的 UHR 和 Chance UHR 平均数和标准差 / Calculate mean and standard deviation for UHR and Chance UHR by Expression Type
+# 将相关变量转换为因子，便于后续建模
+results <- results %>%
+  mutate(
+    Face_Gender = factor(Face_Gender),
+    Rater_Gender = factor(Rater_Gender),
+    Expression_Type = factor(Expression_Type, levels = expected_emotions),
+    Version = factor(Version),
+    Group = factor(Group)
+  )
+
+# 可选：统计各 Expression_Type 的均值和标准差，并保存到 CSV 文件
 uhr_stats <- results %>%
   group_by(Expression_Type) %>%
   summarise(
@@ -138,29 +234,33 @@ uhr_stats <- results %>%
     Mean_Chance_UHR = mean(Chance_UHR, na.rm = TRUE),
     SD_Chance_UHR = sd(Chance_UHR, na.rm = TRUE)
   )
-
-# 保存 UHR 和 Chance UHR 的平均数和标准差到 CSV 文件 / Save UHR and Chance UHR means and standard deviations to CSV file
 write.csv(uhr_stats, "UHR_ChanceUHR_Avg_SD.csv", row.names = FALSE)
+cat("UHR 及 Chance UHR 的统计结果已保存为 UHR_ChanceUHR_Avg_SD.csv。\n")
 
-# Step 7: 进行重复测量 ANOVA / Perform repeated measures ANOVA
-aov_results <- aov(Arcsine_UHR ~ Expression_Type + Error(CASE/Expression_Type), data = results)
+# ---------------------------------------------------------------------------
+# Step 8: 构建混合效应模型（LMM）
+# 固定效应：Face_Gender, Rater_Gender, Expression_Type, Version, Group
+# 随机效应：CASE（被试 ID）
+lmer_model <- lmer(Arcsine_UHR ~ Face_Gender + Rater_Gender + Expression_Type + Version + Group + (1|CASE), 
+                   data = results)
+summary(lmer_model)
 
-# 查看 ANOVA 结果 / View ANOVA results
-summary(aov_results)
-
-# Step 8: 进行事后检验 / Perform post-hoc tests
-emms <- emmeans(aov_results, ~ Expression_Type)
+# 使用 emmeans 对 Expression_Type 进行两两事后检验
+emms <- emmeans(lmer_model, ~ Expression_Type)
 pairwise_comparison <- pairs(emms)
 
-# 保存 ANOVA 结果和事后检验结果 / Save ANOVA and post-hoc test results
+# 将模型及事后检验结果保存到文本文件中
 capture.output({
-  cat("ANOVA Results:\n")
-  print(summary(aov_results))
+  cat("Mixed Effects Model Results:\n")
+  print(summary(lmer_model))
   cat("\n\nPairwise Comparisons (Post Hoc Test):\n")
   print(pairwise_comparison)
-}, file = "analysis_ANOVA_UHR.txt")
+}, file = "analysis_LMM_UHR.txt")
+cat("混合效应模型及事后检验结果已保存为 analysis_LMM_UHR.txt。\n")
 
-# Step 9: 可视化结果 / Visualize results
+# ---------------------------------------------------------------------------
+# Step 9: 可视化结果
+# 计算每种 Expression_Type 下 Arcsine_UHR 的均值和标准误
 mean_uhr <- results %>%
   group_by(Expression_Type) %>%
   summarise(
@@ -168,6 +268,7 @@ mean_uhr <- results %>%
     SE = sd(Arcsine_UHR, na.rm = TRUE) / sqrt(n())
   )
 
+# 绘制带误差条的折线图
 ggplot(mean_uhr, aes(x = Expression_Type, y = Mean_UHR)) +
   geom_line(group = 1, color = "blue") +
   geom_point(size = 3) +
@@ -178,5 +279,32 @@ ggplot(mean_uhr, aes(x = Expression_Type, y = Mean_UHR)) +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 10))
 
-# 保存结果 / Save results
+# ---------------------------------------------------------------------------
+# Step 10: 保存最终结果到 Excel 文件
 write.xlsx(results, "uhr_results_all_cases.xlsx", rowNames = FALSE)
+cat("最终结果已保存为 uhr_results_all_cases.xlsx。\n")
+
+######################################################################################
+library(dplyr)
+
+# 定义预期的表情水平
+expected_emotions <- c("Affiliation", "Disgust", "Dominance", "Enjoyment", "Neutral")
+
+# 只考虑有效选择（Chosen_Expression 不为 "Other"）的记录
+valid_choices <- data %>%
+  filter(Expression_Type %in% expected_emotions, Chosen_Expression != "Other")
+
+# 按 CASE 和 Expression_Type 统计记录数和不同 Face_Gender 数量
+problematic_cases <- valid_choices %>%
+  group_by(CASE, Expression_Type) %>%
+  summarise(
+    total_choices = n(),
+    distinct_genders = n_distinct(Face_Gender),
+    genders = paste(unique(Face_Gender), collapse = ", "),
+    .groups = "drop"
+  ) %>%
+  # 筛选出记录数只有1条，或者在该分组下只有一种 Face_Gender的情况
+  filter(total_choices == 1 | distinct_genders == 1)
+
+# 查看问题案例
+print(problematic_cases)
